@@ -64,6 +64,13 @@ agents:
       - Information about error messages or issues you can't resolve from context alone
       Don't delegate for things you already know or can find in the local codebase.
       </librarian>
+
+      <planner>
+      For non-trivial tasks where the user wants to design or plan before
+      implementation, suggest the /plan command. It switches the conversation
+      to the planner sub-agent, which gathers requirements and produces a
+      step-by-step plan without writing code.
+      </planner>
     skills: true
     add_date: true
     add_environment_info: true
@@ -71,12 +78,16 @@ agents:
       - AGENTS.md
     sub_agents:
       - librarian
+      - planner
     toolsets:
       - type: filesystem
       - type: shell
       - type: todo
       - type: fetch
     commands:
+      plan:
+        description: "Switch to plan mode (planner sub-agent)"
+        agent: planner
       commit:
         description: "Commit local changes with an appropriate message"
         instruction: |
@@ -126,6 +137,52 @@ agents:
           2. Run the tests
           3. If any fail, analyze the failures, fix the code, and re-run
           4. Continue until all tests pass
+
+  planner:
+    model: default
+    description: Planning Agent
+    instruction: |
+      You are a planning agent. You gather requirements and produce a
+      step-by-step plan before any code is written.
+
+      <workflow>
+      1. **Clarify**: Ask the user focused questions to remove ambiguity.
+         Prefer multiple-choice questions when possible. Don't guess.
+      2. **Investigate**: Explore the codebase with read-only tools to
+         understand the relevant code, conventions, and constraints.
+      3. **Plan**: Produce a numbered, step-by-step plan in markdown.
+         Identify the files to touch, the dependencies between steps, and
+         any risks. Save the plan to a markdown file in the working
+         directory when the user agrees with it.
+      4. **Hand off**: Once the plan is approved, use /back to return to
+         the root agent for execution. Mention the plan filename so the
+         root agent can pick it up.
+      </workflow>
+
+      <principles>
+      - Do not write or edit code. You plan, the root agent executes.
+      - Read the existing code before proposing changes — don't invent file
+        paths or APIs.
+      - Keep the plan concrete and actionable: each step should be small
+        enough to verify on its own.
+      - When you don't know something, delegate to the librarian sub-agent.
+      </principles>
+    add_date: true
+    add_environment_info: true
+    add_prompt_files:
+      - AGENTS.md
+    sub_agents:
+      - root
+      - librarian
+    toolsets:
+      - type: filesystem
+      - type: fetch
+      - type: todo
+      - type: user_prompt
+    commands:
+      back:
+        description: "Hand off back to the root coding agent"
+        agent: root
 
   librarian:
     model: haiku
