@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sync"
 	"testing"
@@ -63,6 +64,19 @@ func (m *modelSwitchingRuntime) SetAgentModel(_ context.Context, agentName, mode
 	return nil
 }
 
+// startAttachedServer wires a SessionManager + HTTP server backed by an
+// in-process listener and registers a t.Cleanup that closes the listener
+// (and unblocks the Serve goroutine) when the test finishes.
+func startAttachedServer(t *testing.T, ctx context.Context, sm *SessionManager) string {
+	t.Helper()
+	srv := NewWithManager(sm, "")
+	ln, err := Listen(ctx, "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() { _ = srv.Serve(ctx, ln) }()
+	return "http://" + ln.Addr().String()
+}
+
 func TestSessionManager_CreateSession_KeepsModelOverrides(t *testing.T) {
 	t.Parallel()
 
@@ -107,19 +121,14 @@ func TestAttachedServer_GetSessionModels(t *testing.T) {
 
 	choices := []runtime.ModelChoice{
 		{Name: "default", Ref: "openai/gpt-4o-mini", Provider: "openai", Model: "gpt-4o-mini", IsDefault: true},
-		{Name: "custom", Ref: "openai/gpt-4o", Provider: "openai", Model: "gpt-4o", IsCurrent: true},
+		{Name: "custom", Ref: "openai/gpt-4o", Provider: "openai", Model: "gpt-4o"},
 	}
 	fake := newModelSwitchingRuntime(choices)
 
 	sm := NewSessionManager(ctx, config.Sources{}, store, 0, &config.RuntimeConfig{})
 	sm.AttachRuntime(sess.ID, fake, sess)
 
-	srv := NewWithManager(sm, "")
-	ln, err := Listen(ctx, "127.0.0.1:0")
-	require.NoError(t, err)
-	go func() { _ = srv.Serve(ctx, ln) }()
-
-	addr := "http://" + ln.Addr().String()
+	addr := startAttachedServer(t, ctx, sm)
 	resp := httpDoTCP(t, ctx, http.MethodGet, addr+"/api/sessions/"+sess.ID+"/models", nil)
 
 	var got runtime.SessionModelsResponse
@@ -130,8 +139,73 @@ func TestAttachedServer_GetSessionModels(t *testing.T) {
 	require.Len(t, got.Models, 2)
 	assert.Equal(t, "openai/gpt-4o-mini", got.Models[0].Ref)
 	assert.True(t, got.Models[0].IsDefault)
+	assert.False(t, got.Models[0].IsCurrent, "default must not be marked current when an override is active")
 	assert.Equal(t, "openai/gpt-4o", got.Models[1].Ref)
-	assert.True(t, got.Models[1].IsCurrent)
+	assert.True(t, got.Models[1].IsCurrent, "the model matching the override must be marked current")
+}
+
+// When no override is set, the agent's default model must be marked
+// IsCurrent so the picker can highlight it without a second round trip.
+func TestAttachedServer_GetSessionModels_DefaultMarkedCurrent(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+
+	store := session.NewInMemorySessionStore()
+	sess := session.New()
+	require.NoError(t, store.AddSession(ctx, sess))
+
+	choices := []runtime.ModelChoice{
+		{Name: "default", Ref: "openai/gpt-4o-mini", IsDefault: true},
+		{Name: "other", Ref: "openai/gpt-4o"},
+	}
+	fake := newModelSwitchingRuntime(choices)
+
+	sm := NewSessionManager(ctx, config.Sources{}, store, 0, &config.RuntimeConfig{})
+	sm.AttachRuntime(sess.ID, fake, sess)
+
+	addr := startAttachedServer(t, ctx, sm)
+	resp := httpDoTCP(t, ctx, http.MethodGet, addr+"/api/sessions/"+sess.ID+"/models", nil)
+
+	var got runtime.SessionModelsResponse
+	require.NoError(t, json.Unmarshal(resp, &got))
+
+	assert.Empty(t, got.CurrentModelRef)
+	require.Len(t, got.Models, 2)
+	assert.True(t, got.Models[0].IsCurrent, "default model must be marked current when no override is set")
+	assert.False(t, got.Models[1].IsCurrent)
+}
+
+// Custom (provider/model) refs from the session history must be appended
+// to the picker so a user can pick a previously used model again.
+func TestAttachedServer_GetSessionModels_AppendsCustomModels(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+
+	store := session.NewInMemorySessionStore()
+	sess := session.New()
+	sess.CustomModelsUsed = []string{"openai/gpt-4o"}
+	require.NoError(t, store.AddSession(ctx, sess))
+
+	choices := []runtime.ModelChoice{
+		{Name: "default", Ref: "openai/gpt-4o-mini", IsDefault: true},
+	}
+	fake := newModelSwitchingRuntime(choices)
+
+	sm := NewSessionManager(ctx, config.Sources{}, store, 0, &config.RuntimeConfig{})
+	sm.AttachRuntime(sess.ID, fake, sess)
+
+	addr := startAttachedServer(t, ctx, sm)
+	resp := httpDoTCP(t, ctx, http.MethodGet, addr+"/api/sessions/"+sess.ID+"/models", nil)
+
+	var got runtime.SessionModelsResponse
+	require.NoError(t, json.Unmarshal(resp, &got))
+
+	require.Len(t, got.Models, 2)
+	assert.Equal(t, "openai/gpt-4o-mini", got.Models[0].Ref)
+	assert.Equal(t, "openai/gpt-4o", got.Models[1].Ref)
+	assert.True(t, got.Models[1].IsCustom)
 }
 
 func TestAttachedServer_SetSessionModel_PersistsOverride(t *testing.T) {
@@ -148,12 +222,7 @@ func TestAttachedServer_SetSessionModel_PersistsOverride(t *testing.T) {
 	sm := NewSessionManager(ctx, config.Sources{}, store, 0, &config.RuntimeConfig{})
 	sm.AttachRuntime(sess.ID, fake, sess)
 
-	srv := NewWithManager(sm, "")
-	ln, err := Listen(ctx, "127.0.0.1:0")
-	require.NoError(t, err)
-	go func() { _ = srv.Serve(ctx, ln) }()
-
-	addr := "http://" + ln.Addr().String()
+	addr := startAttachedServer(t, ctx, sm)
 	resp := httpDoTCP(t, ctx, http.MethodPatch, addr+"/api/sessions/"+sess.ID+"/model",
 		api.SetSessionModelRequest{Model: "anthropic/claude-sonnet-4-0"})
 
@@ -190,12 +259,7 @@ func TestAttachedServer_SetSessionModel_EmptyClearsOverride(t *testing.T) {
 	sm := NewSessionManager(ctx, config.Sources{}, store, 0, &config.RuntimeConfig{})
 	sm.AttachRuntime(sess.ID, fake, sess)
 
-	srv := NewWithManager(sm, "")
-	ln, err := Listen(ctx, "127.0.0.1:0")
-	require.NoError(t, err)
-	go func() { _ = srv.Serve(ctx, ln) }()
-
-	addr := "http://" + ln.Addr().String()
+	addr := startAttachedServer(t, ctx, sm)
 	_ = httpDoTCP(t, ctx, http.MethodPatch, addr+"/api/sessions/"+sess.ID+"/model",
 		api.SetSessionModelRequest{Model: ""})
 
@@ -222,12 +286,7 @@ func TestAttachedServer_SetSessionModel_PostVerbAlsoWorks(t *testing.T) {
 	sm := NewSessionManager(ctx, config.Sources{}, store, 0, &config.RuntimeConfig{})
 	sm.AttachRuntime(sess.ID, fake, sess)
 
-	srv := NewWithManager(sm, "")
-	ln, err := Listen(ctx, "127.0.0.1:0")
-	require.NoError(t, err)
-	go func() { _ = srv.Serve(ctx, ln) }()
-
-	addr := "http://" + ln.Addr().String()
+	addr := startAttachedServer(t, ctx, sm)
 	_ = httpDoTCP(t, ctx, http.MethodPost, addr+"/api/sessions/"+sess.ID+"/model",
 		api.SetSessionModelRequest{Model: "openai/gpt-4o"})
 
@@ -247,12 +306,7 @@ func TestAttachedServer_GetSessionModels_NotSupported(t *testing.T) {
 	sm := NewSessionManager(ctx, config.Sources{}, store, 0, &config.RuntimeConfig{})
 	sm.AttachRuntime(sess.ID, &fakeRuntime{}, sess)
 
-	srv := NewWithManager(sm, "")
-	ln, err := Listen(ctx, "127.0.0.1:0")
-	require.NoError(t, err)
-	go func() { _ = srv.Serve(ctx, ln) }()
-
-	addr := "http://" + ln.Addr().String()
+	addr := startAttachedServer(t, ctx, sm)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, addr+"/api/sessions/"+sess.ID+"/models", http.NoBody)
 	require.NoError(t, err)
@@ -260,4 +314,105 @@ func TestAttachedServer_GetSessionModels_NotSupported(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+}
+
+// failingStore wraps an in-memory store so UpdateSession can be made to
+// fail on demand to exercise the rollback path of SetSessionAgentModel.
+type failingStore struct {
+	session.Store
+
+	mu         sync.Mutex
+	failUpdate bool
+}
+
+func (s *failingStore) UpdateSession(ctx context.Context, sess *session.Session) error {
+	s.mu.Lock()
+	fail := s.failUpdate
+	s.mu.Unlock()
+	if fail {
+		return errors.New("synthetic store failure")
+	}
+	return s.Store.UpdateSession(ctx, sess)
+}
+
+// When the session store rejects the persistence write, the in-memory
+// session and the runtime override must both be rolled back so the next
+// read does not surface state that was never persisted.
+func TestSessionManager_SetSessionAgentModel_RollsBackOnStoreFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	store := &failingStore{Store: session.NewInMemorySessionStore()}
+	sess := session.New()
+	require.NoError(t, store.AddSession(ctx, sess))
+
+	fake := newModelSwitchingRuntime(nil)
+
+	sm := NewSessionManager(ctx, config.Sources{}, store, 0, &config.RuntimeConfig{})
+	sm.AttachRuntime(sess.ID, fake, sess)
+
+	store.mu.Lock()
+	store.failUpdate = true
+	store.mu.Unlock()
+
+	_, _, err := sm.SetSessionAgentModel(ctx, sess.ID, "openai/gpt-4o")
+	require.Error(t, err)
+
+	// In-memory session must not contain the override.
+	_, exists := sess.AgentModelOverrides["root"]
+	assert.False(t, exists, "in-memory override must be rolled back")
+	assert.NotContains(t, sess.CustomModelsUsed, "openai/gpt-4o", "CustomModelsUsed must be rolled back")
+
+	// Runtime must not have the override either.
+	fake.mu.Lock()
+	_, runtimeHas := fake.overrides["root"]
+	fake.mu.Unlock()
+	assert.False(t, runtimeHas, "runtime override must be rolled back")
+}
+
+// decorateModelChoices is exercised through the GET handler tests above;
+// this unit test pins a few important corner cases that are too tedious
+// to reach over HTTP.
+func TestDecorateModelChoices(t *testing.T) {
+	t.Parallel()
+
+	t.Run("synthesizes choice for inline override not in list", func(t *testing.T) {
+		t.Parallel()
+		got := decorateModelChoices(
+			[]runtime.ModelChoice{{Name: "default", Ref: "openai/gpt-4o-mini", IsDefault: true}},
+			"anthropic/claude-sonnet-4-0",
+			nil,
+		)
+		require.Len(t, got, 2)
+		assert.Equal(t, "anthropic/claude-sonnet-4-0", got[1].Ref)
+		assert.Equal(t, "anthropic", got[1].Provider)
+		assert.Equal(t, "claude-sonnet-4-0", got[1].Model)
+		assert.True(t, got[1].IsCurrent)
+		assert.True(t, got[1].IsCustom)
+	})
+
+	t.Run("does not duplicate custom ref already in list", func(t *testing.T) {
+		t.Parallel()
+		got := decorateModelChoices(
+			[]runtime.ModelChoice{{Name: "default", Ref: "openai/gpt-4o", IsDefault: true}},
+			"",
+			[]string{"openai/gpt-4o"},
+		)
+		require.Len(t, got, 1)
+		assert.Equal(t, "openai/gpt-4o", got[0].Ref)
+	})
+
+	t.Run("non-provider override (config key) does not synthesize choice", func(t *testing.T) {
+		t.Parallel()
+		// "my_model" is a config key (no slash); when not in the runtime's
+		// list we should NOT fabricate a choice for it because we have no
+		// provider/model breakdown to display.
+		got := decorateModelChoices(
+			[]runtime.ModelChoice{{Name: "default", Ref: "default", IsDefault: true}},
+			"my_model",
+			nil,
+		)
+		require.Len(t, got, 1)
+		assert.False(t, got[0].IsCurrent, "default must not be marked current when override is unknown")
+	})
 }
