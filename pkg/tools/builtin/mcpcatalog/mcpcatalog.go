@@ -6,20 +6,21 @@
 //
 //   - search_remote_mcp_servers — case-insensitive fuzzy search over the
 //     curated catalog (id / title / description / category / tags).
+//   - list_remote_mcp_servers   — show currently enabled servers.
 //   - enable_remote_mcp_server  — instantiate an *mcp.Toolset for a server
-//     (defers the actual TCP connect / OAuth handshake until the model
-//     calls one of the server's tools).
+//     (defers the actual TCP connect / OAuth handshake until Tools() is
+//     next enumerated).
 //   - disable_remote_mcp_server — stop the toolset and remove its tools.
-//   - list_remote_mcp_servers   — show currently enabled servers and their state.
 //
 // Activated servers' tools are merged into Tools(); tool list changes are
 // reported via a tools.ChangeNotifier handler so the runtime refreshes
 // the LLM's tool catalogue as soon as a server is enabled or disabled.
 //
-// The expensive parts — DNS, TCP, MCP handshake, OAuth flow — happen on
-// the *first* tool call, courtesy of mcp.Toolset's lifecycle.Supervisor.
-// If the server requires OAuth, the existing elicitation pipeline picks
-// it up and surfaces an authorization URL to the user.
+// On-demand semantics: the expensive parts — DNS, TCP, MCP handshake,
+// OAuth flow — happen the first time Tools() is called for a freshly
+// enabled server. The handshake runs through the same lifecycle.Supervisor
+// the YAML-declared `mcp.remote` toolset uses, so OAuth elicitation and
+// tool-list-change notifications behave identically.
 package mcpcatalog
 
 import (
@@ -53,18 +54,30 @@ type Toolset struct {
 	expander *js.Expander
 	env      environment.Provider
 
-	mu      sync.RWMutex
-	enabled map[string]*mcp.Toolset
+	mu sync.RWMutex
+	// enabled holds the per-server StartableToolSet wrapper. Wrapping the
+	// inner *mcp.Toolset in a StartableToolSet gives us:
+	//   - single-flight, idempotent Start() (so Tools() can call it on
+	//     every enumeration without re-running the MCP handshake);
+	//   - de-duplicated Start failure warnings (once per failure streak,
+	//     reset by a subsequent success);
+	//   - the same lifecycle wrapper the agent uses for YAML-declared
+	//     toolsets, so the inner mcp.Toolset is treated identically.
+	enabled map[string]*tools.StartableToolSet
 
-	// elicitationHandler / oauthSuccessHandler / toolsChangedHandler are
-	// captured by the runtime via tools.As[...] *before* any server is
-	// enabled; we re-attach them to each new mcp.Toolset on enable so
-	// OAuth elicitation, OAuth-success refreshes and tool-list changes
-	// behave identically to a YAML-declared `mcp.remote` toolset.
+	// elicitationHandler / oauthSuccessHandler / managedOAuth /
+	// toolsChangedHandler are captured before any server is enabled
+	// (the runtime calls these via tools.As[...] from
+	// configureToolsetHandlers at the start of every turn). They are
+	// re-applied to each new mcp.Toolset on enable so OAuth elicitation,
+	// OAuth-success refreshes, the managed-vs-unmanaged flag and
+	// tool-list change notifications behave identically to a YAML-
+	// declared `mcp.remote` toolset.
 	elicitationHandler  tools.ElicitationHandler
 	oauthSuccessHandler func()
 	toolsChangedHandler func()
 	managedOAuth        bool
+	managedOAuthSet     bool // distinguishes "default" from "explicitly false"
 }
 
 var (
@@ -92,7 +105,7 @@ func New(envProvider environment.Provider) *Toolset {
 		byID:     byID,
 		expander: js.NewJsExpander(envProvider),
 		env:      envProvider,
-		enabled:  make(map[string]*mcp.Toolset),
+		enabled:  make(map[string]*tools.StartableToolSet),
 	}
 }
 
@@ -113,10 +126,12 @@ Workflow:
      Use any term related to the user's intent ("notion", "stripe",
      "docs", "search", "browser", …).
   2. Call ` + ToolNameEnable + ` with the server's "id" to activate it.
-     This adds the server's tools to your set. Authentication (OAuth or
-     API key) is deferred — it's triggered on the first tool call.
-     For api_key servers, make sure the listed env var(s) are set in the
-     user's shell BEFORE enabling, otherwise the first call will fail.
+     This adds the server's tools to your set on the *next* turn.
+     Authentication (OAuth or API key) is deferred — it is triggered when
+     the host enumerates the server's tools, which happens once enabling
+     completes. For api_key servers, make sure the listed env var(s) are
+     set in the user's shell BEFORE enabling, otherwise the server will
+     refuse the connection.
   3. Use the newly activated tools as you would any other.
   4. Call ` + ToolNameDisable + ` to remove a server when no longer needed.
 
@@ -126,7 +141,7 @@ tools to the prompt and contributes to context usage.`
 
 // Start is a no-op: the catalog is embedded and no servers are auto-enabled.
 // Lifecycle for individual MCP toolsets is managed when Enable / Disable
-// are invoked.
+// are invoked, with first-use lazy start happening inside Tools().
 func (t *Toolset) Start(context.Context) error { return nil }
 
 // Stop tears down every enabled MCP toolset. Errors are logged but do not
@@ -134,7 +149,7 @@ func (t *Toolset) Start(context.Context) error { return nil }
 func (t *Toolset) Stop(ctx context.Context) error {
 	t.mu.Lock()
 	enabled := t.enabled
-	t.enabled = make(map[string]*mcp.Toolset)
+	t.enabled = make(map[string]*tools.StartableToolSet)
 	t.mu.Unlock()
 
 	for id, ts := range enabled {
@@ -153,7 +168,9 @@ func (t *Toolset) SetElicitationHandler(handler tools.ElicitationHandler) {
 	enabled := t.snapshotEnabled()
 	t.mu.Unlock()
 	for _, ts := range enabled {
-		ts.SetElicitationHandler(handler)
+		if e, ok := tools.As[tools.Elicitable](ts); ok {
+			e.SetElicitationHandler(handler)
+		}
 	}
 }
 
@@ -166,7 +183,9 @@ func (t *Toolset) SetOAuthSuccessHandler(handler func()) {
 	enabled := t.snapshotEnabled()
 	t.mu.Unlock()
 	for _, ts := range enabled {
-		ts.SetOAuthSuccessHandler(handler)
+		if o, ok := tools.As[tools.OAuthCapable](ts); ok {
+			o.SetOAuthSuccessHandler(handler)
+		}
 	}
 }
 
@@ -175,10 +194,13 @@ func (t *Toolset) SetOAuthSuccessHandler(handler func()) {
 func (t *Toolset) SetManagedOAuth(managed bool) {
 	t.mu.Lock()
 	t.managedOAuth = managed
+	t.managedOAuthSet = true
 	enabled := t.snapshotEnabled()
 	t.mu.Unlock()
 	for _, ts := range enabled {
-		ts.SetManagedOAuth(managed)
+		if o, ok := tools.As[tools.OAuthCapable](ts); ok {
+			o.SetManagedOAuth(managed)
+		}
 	}
 }
 
@@ -192,15 +214,17 @@ func (t *Toolset) SetToolsChangedHandler(handler func()) {
 	enabled := t.snapshotEnabled()
 	t.mu.Unlock()
 	for _, ts := range enabled {
-		ts.SetToolsChangedHandler(handler)
+		if n, ok := tools.As[tools.ChangeNotifier](ts); ok {
+			n.SetToolsChangedHandler(handler)
+		}
 	}
 }
 
 // snapshotEnabled returns the currently enabled toolsets as a fresh slice.
 // Caller MUST hold t.mu (read or write). Used to forward setter calls
 // outside the critical section.
-func (t *Toolset) snapshotEnabled() []*mcp.Toolset {
-	out := make([]*mcp.Toolset, 0, len(t.enabled))
+func (t *Toolset) snapshotEnabled() []*tools.StartableToolSet {
+	out := make([]*tools.StartableToolSet, 0, len(t.enabled))
 	for _, ts := range t.enabled {
 		out = append(out, ts)
 	}
@@ -210,6 +234,14 @@ func (t *Toolset) snapshotEnabled() []*mcp.Toolset {
 // Tools returns the meta-tools plus every tool exposed by an activated
 // remote MCP server. Tools from unactivated servers are intentionally
 // hidden so they don't bloat the prompt.
+//
+// First-call lazy start: each enabled server is Start()'d on its first
+// enumeration. On startup the runtime probes tools with a non-interactive
+// context (mcp.WithoutInteractivePrompts), so OAuth-pending servers fail
+// fast with mcp.IsAuthorizationRequired and are silently deferred. On
+// interactive turns, Start() blocks on OAuth elicitation as the user
+// expects, and the resulting tools join the result set on the next
+// enumeration.
 func (t *Toolset) Tools(ctx context.Context) ([]tools.Tool, error) {
 	result := []tools.Tool{
 		{
@@ -239,7 +271,7 @@ func (t *Toolset) Tools(ctx context.Context) ([]tools.Tool, error) {
 		{
 			Name:         ToolNameEnable,
 			Category:     "mcp_catalog",
-			Description:  "Activate a remote MCP server from the catalog by id. Connection (and any required OAuth flow or API-key check) is deferred until the first tool call.",
+			Description:  "Activate a remote MCP server from the catalog by id. Connection (and any required OAuth flow or API-key check) is deferred until the host next lists the agent's tools.",
 			Parameters:   tools.MustSchemaFor[EnableArgs](),
 			OutputSchema: tools.MustSchemaFor[string](),
 			Handler:      tools.NewHandler(t.handleEnable),
@@ -260,32 +292,61 @@ func (t *Toolset) Tools(ctx context.Context) ([]tools.Tool, error) {
 		},
 	}
 
-	// Append tools from every enabled server. We accept partial results:
-	// a single failing server (e.g. transient network blip) shouldn't hide
-	// the others. The catalog meta-tools always come first.
 	t.mu.RLock()
-	enabled := make([]*mcp.Toolset, 0, len(t.enabled))
-	for _, ts := range t.enabled {
-		enabled = append(enabled, ts)
+	enabled := make([]enabledServer, 0, len(t.enabled))
+	for id, ts := range t.enabled {
+		enabled = append(enabled, enabledServer{id: id, ts: ts})
 	}
 	t.mu.RUnlock()
 
-	for _, ts := range enabled {
-		// Check for context cancellation before calling each toolset
+	for _, e := range enabled {
 		if err := ctx.Err(); err != nil {
-			return result, err
+			return nil, err
 		}
 
-		serverTools, err := ts.Tools(ctx)
+		if !e.ts.IsStarted() {
+			if err := e.ts.Start(ctx); err != nil {
+				// Auth-required is an *expected* deferral when probing
+				// with a non-interactive context (startup tool count) or
+				// when the elicitation bridge is not yet ready. Silent
+				// — the next interactive turn will retry and surface
+				// the OAuth dialog naturally.
+				if mcp.IsAuthorizationRequired(err) {
+					slog.DebugContext(ctx, "Remote MCP server requires authorization; deferred to next turn",
+						"id", e.id)
+					continue
+				}
+				// Real failure: log once per streak (StartableToolSet
+				// dedupes) so a misbehaving server doesn't flood logs.
+				if e.ts.ShouldReportFailure() {
+					slog.WarnContext(ctx, "Failed to start enabled remote MCP server",
+						"id", e.id, "error", err)
+				} else {
+					slog.DebugContext(ctx, "Remote MCP server still unavailable",
+						"id", e.id, "error", err)
+				}
+				continue
+			}
+		}
+
+		serverTools, err := e.ts.Tools(ctx)
 		if err != nil {
 			slog.WarnContext(ctx, "Failed to list tools for enabled remote MCP server",
-				"server", ts.Name(), "error", err)
+				"id", e.id, "error", err)
 			continue
 		}
 		result = append(result, serverTools...)
 	}
 
 	return result, nil
+}
+
+// enabledServer pairs an id with its toolset for stable iteration outside
+// the lock. It exists so callers can correlate "the server that failed
+// to start" with its catalog id without re-reading the map.
+type enabledServer struct {
+	id string
+	ts *tools.StartableToolSet
 }
 
 // SearchArgs is the input schema for the search meta-tool.
@@ -385,10 +446,9 @@ func (t *Toolset) handleEnable(ctx context.Context, args EnableArgs) (*tools.Too
 	headers := t.expander.ExpandMap(ctx, server.Headers)
 	mcpToolset := mcp.NewRemoteToolset(id, server.URL, server.Transport, headers, nil)
 
-	// Re-attach the captured handlers so OAuth flows behave identically
-	// to a YAML-declared mcp.remote toolset. The toolsChangedHandler is
-	// also forwarded so the runtime is notified when the underlying
-	// server pushes a tools/list_changed notification.
+	// Re-attach the captured handlers so OAuth flows behave identically to
+	// a YAML-declared mcp.remote toolset. Apply BEFORE wrapping so we hit
+	// the *mcp.Toolset's typed setters directly without a tools.As walk.
 	if t.elicitationHandler != nil {
 		mcpToolset.SetElicitationHandler(t.elicitationHandler)
 	}
@@ -398,11 +458,12 @@ func (t *Toolset) handleEnable(ctx context.Context, args EnableArgs) (*tools.Too
 	if t.toolsChangedHandler != nil {
 		mcpToolset.SetToolsChangedHandler(t.toolsChangedHandler)
 	}
-	if t.managedOAuth {
+	if t.managedOAuthSet {
 		mcpToolset.SetManagedOAuth(t.managedOAuth)
 	}
 
-	t.enabled[id] = mcpToolset
+	wrapped := tools.NewStartable(mcpToolset)
+	t.enabled[id] = wrapped
 	notify := t.toolsChangedHandler
 	t.mu.Unlock()
 
@@ -412,14 +473,14 @@ func (t *Toolset) handleEnable(ctx context.Context, args EnableArgs) (*tools.Too
 	}
 
 	msg := strings.Builder{}
-	fmt.Fprintf(&msg, "enabled %q (%s) — connection deferred until first tool call.\n", id, server.Title)
+	fmt.Fprintf(&msg, "enabled %q (%s) — connection deferred until the host next enumerates tools.\n", id, server.Title)
 	fmt.Fprintf(&msg, "endpoint: %s\n", server.URL)
 	switch server.Auth.Type {
 	case "oauth":
-		msg.WriteString("auth: OAuth — the first tool call will trigger an authorization URL elicitation.\n")
+		msg.WriteString("auth: OAuth — an authorization URL will be elicited on the next turn.\n")
 	case "api_key":
 		if len(missing) > 0 {
-			fmt.Fprintf(&msg, "auth: API key — WARNING: the following env vars are NOT set: %s. Tool calls will fail until they are exported.\n", strings.Join(missing, ", "))
+			fmt.Fprintf(&msg, "auth: API key — WARNING: the following env vars are NOT set: %s. Set them and re-enable, otherwise tool calls will fail.\n", strings.Join(missing, ", "))
 		} else {
 			msg.WriteString("auth: API key — env vars present, ready to use.\n")
 		}
@@ -457,7 +518,7 @@ func (t *Toolset) handleDisable(ctx context.Context, args DisableArgs) (*tools.T
 	id := strings.TrimSpace(args.ID)
 
 	t.mu.Lock()
-	mcpToolset, exists := t.enabled[id]
+	wrapped, exists := t.enabled[id]
 	if !exists {
 		t.mu.Unlock()
 		return tools.ResultError(fmt.Sprintf("server %q is not enabled", id)), nil
@@ -466,7 +527,7 @@ func (t *Toolset) handleDisable(ctx context.Context, args DisableArgs) (*tools.T
 	notify := t.toolsChangedHandler
 	t.mu.Unlock()
 
-	if err := mcpToolset.Stop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := wrapped.Stop(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		// Stop failures aren't fatal — the entry is already gone from
 		// t.enabled. Just log and tell the model the server is off.
 		slog.WarnContext(ctx, "Failed to stop remote MCP toolset on disable", "id", id, "error", err)

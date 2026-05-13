@@ -3,14 +3,19 @@ package mcpcatalog
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/docker/docker-agent/pkg/tools"
+	mcptools "github.com/docker/docker-agent/pkg/tools/mcp"
 )
 
 type stubEnv struct{ vars map[string]string }
@@ -55,10 +60,8 @@ func TestSearchTool(t *testing.T) {
 	res, err = ts.handleSearch(ctx, SearchArgs{Query: ""})
 	require.NoError(t, err)
 	require.False(t, res.IsError)
-	// Result starts with "found N server(s):" — N should equal catalog count.
 	first := strings.SplitN(res.Output, "\n", 2)[0]
 	assert.Contains(t, first, "found ")
-	// Decoding the JSON portion should give a non-empty list.
 	body := strings.SplitN(res.Output, "\n", 2)[1]
 	var parsed []SearchResult
 	require.NoError(t, json.Unmarshal([]byte(body), &parsed))
@@ -84,9 +87,10 @@ func TestEnableDisableLifecycle(t *testing.T) {
 	}
 	require.NotEmpty(t, oauthID, "test fixture: catalog should contain at least one OAuth server")
 
-	// Track tools-changed callbacks.
-	var changes int
-	ts.SetToolsChangedHandler(func() { changes++ })
+	// Track tools-changed callbacks. Use atomic.Int32 to satisfy -race even
+	// though every call site here happens to be on the same goroutine.
+	var changes atomic.Int32
+	ts.SetToolsChangedHandler(func() { changes.Add(1) })
 
 	// Before enabling: only meta-tools.
 	toolList, err := ts.Tools(ctx)
@@ -104,7 +108,7 @@ func TestEnableDisableLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, res.IsError, "enable failed: %s", res.Output)
 	assert.Contains(t, res.Output, "OAuth")
-	assert.Equal(t, 1, changes, "enable should fire tools-changed handler exactly once")
+	assert.Equal(t, int32(1), changes.Load(), "enable should fire tools-changed handler exactly once")
 
 	ts.mu.RLock()
 	_, exists := ts.enabled[oauthID]
@@ -115,7 +119,7 @@ func TestEnableDisableLifecycle(t *testing.T) {
 	res, err = ts.handleEnable(ctx, EnableArgs{ID: oauthID})
 	require.NoError(t, err)
 	assert.Contains(t, res.Output, "already enabled")
-	assert.Equal(t, 1, changes)
+	assert.Equal(t, int32(1), changes.Load())
 
 	// Search now reports it as enabled.
 	res, err = ts.handleSearch(ctx, SearchArgs{Query: oauthID})
@@ -137,7 +141,7 @@ func TestEnableDisableLifecycle(t *testing.T) {
 	res, err = ts.handleDisable(ctx, DisableArgs{ID: oauthID})
 	require.NoError(t, err)
 	require.False(t, res.IsError)
-	assert.Equal(t, 2, changes)
+	assert.Equal(t, int32(2), changes.Load())
 
 	ts.mu.RLock()
 	_, exists = ts.enabled[oauthID]
@@ -148,7 +152,7 @@ func TestEnableDisableLifecycle(t *testing.T) {
 	res, err = ts.handleDisable(ctx, DisableArgs{ID: oauthID})
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
-	assert.Equal(t, 2, changes)
+	assert.Equal(t, int32(2), changes.Load())
 }
 
 func TestEnableUnknownServer(t *testing.T) {
@@ -195,8 +199,6 @@ func TestEnableAPIKeyEnvPresent(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, res.IsError)
 	assert.Contains(t, res.Output, "auth: API key")
-	// Without an env provider we cannot tell if the env vars are set;
-	// the implementation skips the warning and simply enables the server.
 	assert.NotContains(t, res.Output, "WARNING")
 }
 
@@ -245,24 +247,21 @@ func TestSetManagedOAuthPersistence(t *testing.T) {
 	ts := New(stubEnv{vars: map[string]string{}})
 	ctx := t.Context()
 
-	// Set managedOAuth before enabling any server
+	// Setting before any server is enabled must persist so that the next
+	// enabled server inherits the flag (regression: an earlier version
+	// dropped the value because it had no field on the Toolset).
 	ts.SetManagedOAuth(true)
+	assert.True(t, ts.managedOAuth)
+	assert.True(t, ts.managedOAuthSet)
 
-	// Enable a server
 	id := ts.catalog.Servers[0].ID
 	_, err := ts.handleEnable(ctx, EnableArgs{ID: id})
 	require.NoError(t, err)
 
-	// Verify the enabled toolset received the managedOAuth flag
 	ts.mu.RLock()
 	mcpTS, exists := ts.enabled[id]
 	ts.mu.RUnlock()
 	require.True(t, exists)
-
-	// The mcp.Toolset doesn't expose managedOAuth state directly,
-	// but we can verify it was called by checking the toolset exists
-	// and was properly initialized. The actual OAuth behavior would
-	// be tested in the mcp package.
 	assert.NotNil(t, mcpTS)
 }
 
@@ -270,40 +269,34 @@ func TestConcurrentEnableDisable(t *testing.T) {
 	ts := New(stubEnv{vars: map[string]string{}})
 	ctx := t.Context()
 
-	// Pick two different servers
 	require.GreaterOrEqual(t, len(ts.catalog.Servers), 2, "need at least 2 servers for concurrency test")
 	id1 := ts.catalog.Servers[0].ID
 	id2 := ts.catalog.Servers[1].ID
 
 	var wg sync.WaitGroup
-	errors := make(chan error, 4)
+	enableErrs := make(chan error, 2)
 
-	// Concurrent enables
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		_, err := ts.handleEnable(ctx, EnableArgs{ID: id1})
 		if err != nil {
-			errors <- err
+			enableErrs <- err
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		_, err := ts.handleEnable(ctx, EnableArgs{ID: id2})
 		if err != nil {
-			errors <- err
+			enableErrs <- err
 		}
 	}()
-
 	wg.Wait()
-	close(errors)
-
-	// Check for errors
-	for err := range errors {
+	close(enableErrs)
+	for err := range enableErrs {
 		require.NoError(t, err)
 	}
 
-	// Verify both are enabled
 	ts.mu.RLock()
 	_, exists1 := ts.enabled[id1]
 	_, exists2 := ts.enabled[id2]
@@ -311,32 +304,28 @@ func TestConcurrentEnableDisable(t *testing.T) {
 	assert.True(t, exists1)
 	assert.True(t, exists2)
 
-	// Concurrent disables
-	errors = make(chan error, 2)
+	disableErrs := make(chan error, 2)
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		_, err := ts.handleDisable(ctx, DisableArgs{ID: id1})
 		if err != nil {
-			errors <- err
+			disableErrs <- err
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		_, err := ts.handleDisable(ctx, DisableArgs{ID: id2})
 		if err != nil {
-			errors <- err
+			disableErrs <- err
 		}
 	}()
-
 	wg.Wait()
-	close(errors)
-
-	for err := range errors {
+	close(disableErrs)
+	for err := range disableErrs {
 		require.NoError(t, err)
 	}
 
-	// Verify both are disabled
 	ts.mu.RLock()
 	_, exists1 = ts.enabled[id1]
 	_, exists2 = ts.enabled[id2]
@@ -348,19 +337,221 @@ func TestConcurrentEnableDisable(t *testing.T) {
 func TestToolsContextCancellation(t *testing.T) {
 	ts := New(stubEnv{vars: map[string]string{}})
 
-	// Enable a server
 	id := ts.catalog.Servers[0].ID
 	_, err := ts.handleEnable(t.Context(), EnableArgs{ID: id})
 	require.NoError(t, err)
 
-	// Create a cancelled context
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	// Tools() should respect context cancellation
-	// Note: This will return the meta-tools but fail when trying to get
-	// tools from the enabled server
 	_, err = ts.Tools(ctx)
-	// The error should be context.Canceled
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// TestToolsExposesEnabledServerTools is the regression test for the
+// "enabled-but-never-started" bug. It spins up an HTTP server that speaks
+// just enough MCP for an Initialize+ListTools handshake, points a catalog
+// entry at it, and asserts that after enable_remote_mcp_server the
+// returned Tools() includes the server's tool — proving the inner MCP
+// toolset really is started lazily and its tools merge with the meta
+// surface.
+func TestToolsExposesEnabledServerTools(t *testing.T) {
+	srv := newFakeMCPServer(t)
+	defer srv.Close()
+
+	ts := New(stubEnv{vars: map[string]string{}})
+
+	// Inject a synthetic catalog entry that points at the test server.
+	const id = "test-server"
+	server := Server{
+		ID:        id,
+		Title:     "Test",
+		URL:       srv.URL,
+		Transport: "streamable-http",
+		Auth:      Auth{Type: "none"},
+	}
+	ts.catalog.Servers = append(ts.catalog.Servers, server)
+	ts.byID[id] = server
+
+	ctx := t.Context()
+	res, err := ts.handleEnable(ctx, EnableArgs{ID: id})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "enable: %s", res.Output)
+
+	// Tools() must lazily start the inner toolset and include its tools.
+	toolList, err := ts.Tools(ctx)
+	require.NoError(t, err)
+
+	names := toolNames(toolList)
+	// Meta-tools are always there.
+	for _, meta := range []string{ToolNameSearch, ToolNameList, ToolNameEnable, ToolNameDisable} {
+		assert.Contains(t, names, meta)
+	}
+	// And so is the tool exposed by the fake MCP server.
+	assert.Contains(t, names, "test-server_echo",
+		"enabled MCP server's tool must show up after Tools() lazily starts it")
+
+	// Subsequent calls remain cheap (cached).
+	toolList2, err := ts.Tools(ctx)
+	require.NoError(t, err)
+	assert.Len(t, toolList2, len(toolList))
+
+	// Cleanup so the test doesn't leak the supervisor's watch goroutine.
+	require.NoError(t, ts.Stop(ctx))
+}
+
+// TestToolsAuthRequiredIsDeferred verifies the on-demand semantics: a
+// server requiring OAuth that is probed in a non-interactive context
+// must not error out. Tools() returns the meta-surface only and the
+// server is silently retried on the next interactive turn.
+func TestToolsAuthRequiredIsDeferred(t *testing.T) {
+	srv := newAuthRequiredMCPServer(t)
+	defer srv.Close()
+
+	ts := New(stubEnv{vars: map[string]string{}})
+	const id = "auth-required-server"
+	server := Server{
+		ID:        id,
+		Title:     "AuthRequired",
+		URL:       srv.URL,
+		Transport: "streamable-http",
+		Auth:      Auth{Type: "oauth"},
+	}
+	ts.catalog.Servers = append(ts.catalog.Servers, server)
+	ts.byID[id] = server
+
+	ctx := t.Context()
+	_, err := ts.handleEnable(ctx, EnableArgs{ID: id})
+	require.NoError(t, err)
+
+	// Probe with the same context the runtime uses at startup: no
+	// interactive prompts allowed. We expect Tools() to swallow the
+	// AuthorizationRequired error and still return the meta-tools.
+	probeCtx := mcptools.WithoutInteractivePrompts(ctx)
+	toolList, err := ts.Tools(probeCtx)
+	require.NoError(t, err, "auth-required servers must not break Tools()")
+
+	names := toolNames(toolList)
+	for _, meta := range []string{ToolNameSearch, ToolNameList, ToolNameEnable, ToolNameDisable} {
+		assert.Contains(t, names, meta)
+	}
+	// The auth-required server contributes no tools yet.
+	assert.NotContains(t, names, id+"_anything")
+
+	require.NoError(t, ts.Stop(ctx))
+}
+
+// --- minimal fake MCP server helpers -----------------------------------
+//
+// The MCP SDK's streamable-HTTP transport speaks JSON-RPC 2.0 framed in
+// Server-Sent Events. We only need to respond to two methods (initialize
+// and tools/list) for a successful handshake, then immediately close the
+// stream so the client moves on.
+
+func newFakeMCPServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", mcpHandler(t, false))
+	return httptest.NewServer(mux)
+}
+
+func newAuthRequiredMCPServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	// 401 with WWW-Authenticate so the OAuth transport notices.
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer resource="https://example.invalid/.well-known/oauth-protected-resource"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	return httptest.NewServer(mux)
+}
+
+// mcpHandler returns an http.HandlerFunc that responds to a single
+// initialize+tools/list+(notifications) sequence over streamable-HTTP.
+// This is *just* enough to satisfy the MCP SDK's client during its
+// initial handshake; it is NOT a complete server implementation.
+func mcpHandler(t *testing.T, _ bool) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "expected POST", http.StatusMethodNotAllowed)
+			return
+		}
+
+		body, err := readJSONRPC(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Notifications carry no id — the MCP SDK sends notifications/initialized
+		// after the initialize response. Reply 202 Accepted and stop.
+		if body.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", "test-session")
+
+		switch body.Method {
+		case "initialize":
+			writeJSONRPC(t, w, body.ID, map[string]any{
+				"protocolVersion": "2025-03-26",
+				"capabilities":    map[string]any{},
+				"serverInfo": map[string]any{
+					"name":    "fake",
+					"version": "0.0.1",
+				},
+			})
+		case "tools/list":
+			writeJSONRPC(t, w, body.ID, map[string]any{
+				"tools": []map[string]any{
+					{
+						"name":        "echo",
+						"description": "echoes its input",
+						"inputSchema": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"message": map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+			})
+		default:
+			writeJSONRPC(t, w, body.ID, map[string]any{})
+		}
+	}
+}
+
+type jsonrpcRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+func readJSONRPC(r *http.Request) (*jsonrpcRequest, error) {
+	defer r.Body.Close()
+	var req jsonrpcRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, err
+	}
+	if req.JSONRPC != "2.0" {
+		return nil, errors.New("missing jsonrpc=2.0")
+	}
+	return &req, nil
+}
+
+func writeJSONRPC(t *testing.T, w http.ResponseWriter, id json.RawMessage, result any) {
+	t.Helper()
+	resp := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  result,
+	}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
 }
