@@ -251,8 +251,10 @@ func TestSetManagedOAuthPersistence(t *testing.T) {
 	// enabled server inherits the flag (regression: an earlier version
 	// dropped the value because it had no field on the Toolset).
 	ts.SetManagedOAuth(true)
+	ts.mu.RLock()
 	assert.True(t, ts.managedOAuth)
 	assert.True(t, ts.managedOAuthSet)
+	ts.mu.RUnlock()
 
 	id := ts.catalog.Servers[0].ID
 	_, err := ts.handleEnable(ctx, EnableArgs{ID: id})
@@ -527,6 +529,45 @@ func TestResetAuthSurfacesStoreErrors(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
 	assert.Contains(t, res.Output, "keyring on fire")
+}
+
+// TestResetAuthNotifiesEvenWhenKeyringFails verifies the state-vs-notification
+// invariant on the failure path: if the server was enabled, we have already
+// removed it from t.enabled and stopped the inner toolset before calling
+// the keyring; the runtime's tool list has therefore changed regardless of
+// whether the keyring removal eventually succeeds. Notify must fire.
+func TestResetAuthNotifiesEvenWhenKeyringFails(t *testing.T) {
+	ts := New(stubEnv{vars: map[string]string{}})
+	ts.removeOAuthToken = func(string) error { return errors.New("keyring on fire") }
+
+	var changes atomic.Int32
+	ts.SetToolsChangedHandler(func() { changes.Add(1) })
+
+	var oauthID string
+	for _, s := range ts.catalog.Servers {
+		if s.Auth.Type == "oauth" {
+			oauthID = s.ID
+			break
+		}
+	}
+	require.NotEmpty(t, oauthID)
+
+	ctx := t.Context()
+	_, err := ts.handleEnable(ctx, EnableArgs{ID: oauthID})
+	require.NoError(t, err)
+	require.Equal(t, int32(1), changes.Load(), "enable should fire once")
+
+	res, err := ts.handleResetAuth(ctx, ResetAuthArgs{ID: oauthID})
+	require.NoError(t, err)
+	assert.True(t, res.IsError, "keyring failure must be surfaced")
+
+	ts.mu.RLock()
+	_, stillEnabled := ts.enabled[oauthID]
+	ts.mu.RUnlock()
+	assert.False(t, stillEnabled, "server must be removed even when keyring removal fails")
+
+	assert.Equal(t, int32(2), changes.Load(),
+		"reset must notify the runtime that tools changed even if keyring removal fails afterwards")
 }
 
 // TestToolsAuthRequiredIsDeferred verifies the on-demand semantics: a

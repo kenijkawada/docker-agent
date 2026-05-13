@@ -18,6 +18,12 @@
 // reported via a tools.ChangeNotifier handler so the runtime refreshes
 // the LLM's tool catalogue as soon as a server is enabled or disabled.
 //
+// Known limitation: the runtime's MCP-prompt discovery looks for
+// `*mcp.Toolset` directly via tools.As, so prompts exposed by servers
+// activated through this catalog are not surfaced via /prompts. Tools
+// (the primary interface) work fine; the prompt feature would need a
+// separate plumb-through interface to walk into container toolsets.
+//
 // On-demand semantics: the expensive parts — DNS, TCP, MCP handshake,
 // OAuth flow — happen the first time Tools() is called for a freshly
 // enabled server. The handshake runs through the same lifecycle.Supervisor
@@ -635,12 +641,16 @@ func (t *Toolset) handleResetAuth(ctx context.Context, args ResetAuthArgs) (*too
 		}
 	}
 
-	if err := t.removeOAuthToken(server.URL); err != nil {
-		return tools.ResultError(fmt.Sprintf("failed to clear OAuth credentials for %q: %v", id, err)), nil
-	}
-
+	// We've already mutated t.enabled (the server is no longer in the
+	// active set), so the tools surface has changed regardless of whether
+	// the keyring removal below succeeds. Notify *before* the keyring call
+	// so a transient keyring failure can't desync the runtime's tool list.
 	if wasEnabled && notify != nil {
 		notify()
+	}
+
+	if err := t.removeOAuthToken(server.URL); err != nil {
+		return tools.ResultError(fmt.Sprintf("failed to clear OAuth credentials for %q: %v", id, err)), nil
 	}
 
 	msg := strings.Builder{}
