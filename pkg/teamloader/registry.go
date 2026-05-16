@@ -56,7 +56,7 @@ func NewDefaultToolsetRegistry() ToolsetRegistry {
 			"user_prompt":       userprompt.CreateToolSet,
 			"openapi":           openapi.CreateToolSet,
 			"model_picker":      modelpicker.CreateToolSet,
-			"background_agents": createBackgroundAgentsTool,
+			"background_agents": agenttool.CreateToolSet,
 			"rag":               createRAGTool,
 		},
 	}
@@ -104,10 +104,6 @@ func (r *toolsetRegistry) CreateTool(ctx context.Context, toolset latest.Toolset
 // module root in a monorepo) are intentional and must not be silently blocked.
 func resolveToolsetWorkingDir(toolsetWorkingDir, agentWorkingDir string) string {
 	return workingdir.Resolve(toolsetWorkingDir, agentWorkingDir)
-}
-
-func createBackgroundAgentsTool(_ context.Context, _ latest.Toolset, _ string, _ *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
-	return agenttool.NewToolSet(), nil
 }
 
 func createRAGTool(ctx context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
