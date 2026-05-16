@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/docker/docker-agent/pkg/config"
 	"github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/httpclient"
 	"github.com/docker/docker-agent/pkg/js"
@@ -89,9 +90,22 @@ func (t *Tool) callTool(ctx context.Context, toolCall tools.ToolCall) (*tools.To
 	return tools.ResultSuccess(limitOutput(string(body))), nil
 }
 
-func NewAPITool(config latest.APIToolConfig, expander *js.Expander) *Tool {
+// CreateToolSet is used by the tools registry.
+func CreateToolSet(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
+	if toolset.APIConfig.Endpoint == "" {
+		return nil, errors.New("api tool requires an endpoint in api_config")
+	}
+
+	expander := js.NewJsExpander(runConfig.EnvProvider())
+	toolset.APIConfig.Endpoint = expander.Expand(ctx, toolset.APIConfig.Endpoint, nil)
+	toolset.APIConfig.Headers = expander.ExpandMap(ctx, toolset.APIConfig.Headers)
+
+	return NewAPITool(toolset.APIConfig, expander), nil
+}
+
+func NewAPITool(apiConfig latest.APIToolConfig, expander *js.Expander) *Tool {
 	return &Tool{
-		config:   config,
+		config:   apiConfig,
 		expander: expander,
 	}
 }

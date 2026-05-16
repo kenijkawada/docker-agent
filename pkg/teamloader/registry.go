@@ -57,7 +57,7 @@ func NewDefaultToolsetRegistry() ToolsetRegistry {
 			"filesystem":        filesystem.CreateToolSet,
 			"fetch":             fetch.CreateToolSet,
 			"mcp":               createMCPTool,
-			"api":               createAPITool,
+			"api":               api.CreateToolSet,
 			"a2a":               createA2ATool,
 			"lsp":               createLSPTool,
 			"user_prompt":       userprompt.CreateToolSet,
@@ -148,18 +148,6 @@ func resolveToolsetWorkingDir(toolsetWorkingDir, agentWorkingDir string) string 
 	// agentWorkingDir is empty and path is relative: return as-is.
 	// The child process will inherit the OS working directory.
 	return toolsetWorkingDir
-}
-
-func createAPITool(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
-	if toolset.APIConfig.Endpoint == "" {
-		return nil, errors.New("api tool requires an endpoint in api_config")
-	}
-
-	expander := js.NewJsExpander(runConfig.EnvProvider())
-	toolset.APIConfig.Endpoint = expander.Expand(ctx, toolset.APIConfig.Endpoint, nil)
-	toolset.APIConfig.Headers = expander.ExpandMap(ctx, toolset.APIConfig.Headers)
-
-	return api.NewAPITool(toolset.APIConfig, expander), nil
 }
 
 func createMCPTool(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
