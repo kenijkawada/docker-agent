@@ -53,7 +53,7 @@ func NewDefaultToolsetRegistry() ToolsetRegistry {
 			"tasks":             tasks.CreateToolSet,
 			"memory":            memory.CreateToolSet,
 			"think":             think.CreateToolSet,
-			"shell":             createShellTool,
+			"shell":             shell.CreateToolSet,
 			"script":            createScriptTool,
 			"filesystem":        createFilesystemTool,
 			"fetch":             createFetchTool,
@@ -149,16 +149,6 @@ func resolveToolsetWorkingDir(toolsetWorkingDir, agentWorkingDir string) string 
 	// agentWorkingDir is empty and path is relative: return as-is.
 	// The child process will inherit the OS working directory.
 	return toolsetWorkingDir
-}
-
-func createShellTool(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
-	env, err := environment.ExpandAll(ctx, environment.ToValues(toolset.Env), runConfig.EnvProvider())
-	if err != nil {
-		return nil, fmt.Errorf("failed to expand the tool's environment variables: %w", err)
-	}
-	env = append(env, os.Environ()...)
-
-	return shell.NewShellTool(env, runConfig), nil
 }
 
 func createScriptTool(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {

@@ -18,6 +18,8 @@ import (
 
 	"github.com/docker/docker-agent/pkg/concurrent"
 	"github.com/docker/docker-agent/pkg/config"
+	"github.com/docker/docker-agent/pkg/config/latest"
+	"github.com/docker/docker-agent/pkg/environment"
 	"github.com/docker/docker-agent/pkg/shellpath"
 	"github.com/docker/docker-agent/pkg/tools"
 )
@@ -448,6 +450,17 @@ func reapSpawnedChild(cmd *exec.Cmd, pg *processGroup) {
 		_ = cmd.Process.Kill()
 		<-done
 	}
+}
+
+// CreateToolSet is used by the tools registry.
+func CreateToolSet(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
+	env, err := environment.ExpandAll(ctx, environment.ToValues(toolset.Env), runConfig.EnvProvider())
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand the tool's environment variables: %w", err)
+	}
+	env = append(env, os.Environ()...)
+
+	return NewShellTool(env, runConfig), nil
 }
 
 // NewShellTool creates a new shell tool.
