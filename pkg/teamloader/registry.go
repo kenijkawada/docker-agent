@@ -52,7 +52,7 @@ func NewDefaultToolsetRegistry() ToolsetRegistry {
 	return &toolsetRegistry{
 		creators: map[string]ToolsetCreator{
 			"todo":              todo.CreateToolSet,
-			"tasks":             createTasksTool,
+			"tasks":             tasks.CreateToolSet,
 			"memory":            createMemoryTool,
 			"think":             think.CreateToolSet,
 			"shell":             createShellTool,
@@ -168,23 +168,6 @@ func resolveToolsetPath(toolsetPath, parentDir string, runConfig *config.Runtime
 	}
 
 	return path.ValidatePathInDirectory(toolsetPath, basePath)
-}
-
-func createTasksTool(_ context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
-	toolsetPath := toolset.Path
-	if toolsetPath == "" {
-		toolsetPath = "tasks.json"
-	}
-
-	validatedPath, err := resolveToolsetPath(toolsetPath, parentDir, runConfig)
-	if err != nil {
-		return nil, fmt.Errorf("invalid tasks storage path: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(validatedPath), 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create tasks storage directory: %w", err)
-	}
-
-	return tasks.NewTasksTool(validatedPath), nil
 }
 
 func createMemoryTool(_ context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, configName string) (tools.ToolSet, error) {

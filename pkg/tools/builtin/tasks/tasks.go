@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/docker/docker-agent/pkg/config"
+	"github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/path"
 	"github.com/docker/docker-agent/pkg/tools"
 )
@@ -98,6 +100,39 @@ var (
 	_ tools.ToolSet      = (*Tool)(nil)
 	_ tools.Instructable = (*Tool)(nil)
 )
+
+// CreateToolSet is used by the tools registry.
+func CreateToolSet(_ context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
+	toolsetPath := toolset.Path
+	if toolsetPath == "" {
+		toolsetPath = "tasks.json"
+	}
+
+	validatedPath, err := resolveToolsetPath(toolsetPath, parentDir, runConfig)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tasks storage path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(validatedPath), 0o700); err != nil {
+		return nil, fmt.Errorf("failed to create tasks storage directory: %w", err)
+	}
+
+	return NewTasksTool(validatedPath), nil
+}
+
+func resolveToolsetPath(toolsetPath, parentDir string, runConfig *config.RuntimeConfig) (string, error) {
+	toolsetPath = path.ExpandPath(toolsetPath)
+
+	var basePath string
+	if filepath.IsAbs(toolsetPath) {
+		basePath = ""
+	} else if wd := runConfig.WorkingDir; wd != "" {
+		basePath = wd
+	} else {
+		basePath = parentDir
+	}
+
+	return path.ValidatePathInDirectory(toolsetPath, basePath)
+}
 
 func NewTasksTool(storagePath string) *Tool {
 	return &Tool{
