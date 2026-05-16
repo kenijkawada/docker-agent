@@ -18,13 +18,26 @@ import (
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"go.yaml.in/yaml/v4"
 
+	"github.com/docker/docker-agent/pkg/config"
+	"github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/httpclient"
+	"github.com/docker/docker-agent/pkg/js"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/upstream"
 	"github.com/docker/docker-agent/pkg/useragent"
 )
 
 const httpTimeout = 30 * time.Second
+
+// CreateToolSet is used by the tools registry.
+func CreateToolSet(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
+	expander := js.NewJsExpander(runConfig.EnvProvider())
+
+	specURL := expander.Expand(ctx, toolset.URL, nil)
+	headers := expander.ExpandMap(ctx, toolset.Headers)
+
+	return NewOpenAPITool(specURL, headers), nil
+}
 
 // Tool generates HTTP tools from an OpenAPI specification.
 type Tool struct {

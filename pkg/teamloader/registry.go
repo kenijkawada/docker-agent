@@ -8,7 +8,6 @@ import (
 
 	"github.com/docker/docker-agent/pkg/config"
 	"github.com/docker/docker-agent/pkg/config/latest"
-	"github.com/docker/docker-agent/pkg/js"
 	"github.com/docker/docker-agent/pkg/rag"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/tools/a2a"
@@ -55,7 +54,7 @@ func NewDefaultToolsetRegistry() ToolsetRegistry {
 			"a2a":               a2a.CreateToolSet,
 			"lsp":               lsp.CreateToolSet,
 			"user_prompt":       userprompt.CreateToolSet,
-			"openapi":           createOpenAPITool,
+			"openapi":           openapi.CreateToolSet,
 			"model_picker":      createModelPickerTool,
 			"background_agents": createBackgroundAgentsTool,
 			"rag":               createRAGTool,
@@ -105,15 +104,6 @@ func (r *toolsetRegistry) CreateTool(ctx context.Context, toolset latest.Toolset
 // module root in a monorepo) are intentional and must not be silently blocked.
 func resolveToolsetWorkingDir(toolsetWorkingDir, agentWorkingDir string) string {
 	return workingdir.Resolve(toolsetWorkingDir, agentWorkingDir)
-}
-
-func createOpenAPITool(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
-	expander := js.NewJsExpander(runConfig.EnvProvider())
-
-	specURL := expander.Expand(ctx, toolset.URL, nil)
-	headers := expander.ExpandMap(ctx, toolset.Headers)
-
-	return openapi.NewOpenAPITool(specURL, headers), nil
 }
 
 func createModelPickerTool(_ context.Context, toolset latest.Toolset, _ string, _ *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
