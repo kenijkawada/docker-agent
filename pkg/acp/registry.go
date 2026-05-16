@@ -11,10 +11,20 @@ import (
 )
 
 // createToolsetRegistry creates a custom toolset registry with ACP-specific filesystem toolset
-func createToolsetRegistry(agent *Agent) *teamloader.ToolsetRegistry {
-	registry := teamloader.NewDefaultToolsetRegistry()
+func createToolsetRegistry(agent *Agent) teamloader.ToolsetRegistry {
+	return &acpToolsetRegistry{
+		agent:    agent,
+		registry: teamloader.NewDefaultToolsetRegistry(),
+	}
+}
 
-	registry.Register("filesystem", func(ctx context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
+type acpToolsetRegistry struct {
+	agent    *Agent
+	registry teamloader.ToolsetRegistry
+}
+
+func (r *acpToolsetRegistry) CreateTool(ctx context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, agentName string) (tools.ToolSet, error) {
+	if toolset.Type == "filesystem" {
 		wd := runConfig.WorkingDir
 		if wd == "" {
 			var err error
@@ -24,8 +34,8 @@ func createToolsetRegistry(agent *Agent) *teamloader.ToolsetRegistry {
 			}
 		}
 
-		return NewFilesystemToolset(agent, wd), nil
-	})
+		return NewFilesystemToolset(r.agent, wd), nil
+	}
 
-	return registry
+	return r.registry.CreateTool(ctx, toolset, parentDir, runConfig, agentName)
 }

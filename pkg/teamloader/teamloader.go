@@ -38,7 +38,7 @@ var defaultMaxTokens int64 = 32000
 type loadOptions struct {
 	modelOverrides  []string
 	promptFiles     []string
-	toolsetRegistry *ToolsetRegistry
+	toolsetRegistry ToolsetRegistry
 }
 
 type Opt func(*loadOptions) error
@@ -60,7 +60,7 @@ func WithPromptFiles(files []string) Opt {
 }
 
 // WithToolsetRegistry allows using a custom toolset registry instead of the default
-func WithToolsetRegistry(registry *ToolsetRegistry) Opt {
+func WithToolsetRegistry(registry ToolsetRegistry) Opt {
 	return func(opts *loadOptions) error {
 		opts.toolsetRegistry = registry
 		return nil
@@ -407,7 +407,7 @@ func getFallbackModelsForAgent(ctx context.Context, cfg *latest.Config, a *lates
 // getToolsForAgent returns the tool definitions for an agent based on its
 // configuration. Toolset instructions support ${...} JavaScript placeholders
 // (e.g. ${env.X}); they are expanded here using the runtime env provider.
-func getToolsForAgent(ctx context.Context, a *latest.AgentConfig, parentDir string, runConfig *config.RuntimeConfig, registry *ToolsetRegistry, configName string, expander *js.Expander) ([]tools.ToolSet, []string) {
+func getToolsForAgent(ctx context.Context, a *latest.AgentConfig, parentDir string, runConfig *config.RuntimeConfig, registry ToolsetRegistry, configName string, expander *js.Expander) ([]tools.ToolSet, []string) {
 	var (
 		toolSets    []tools.ToolSet
 		warnings    []string

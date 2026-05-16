@@ -43,27 +43,38 @@ import (
 // configName identifies the agent config file (e.g. "memory_agent" from "memory_agent.yaml").
 type ToolsetCreator func(ctx context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, configName string) (tools.ToolSet, error)
 
-// ToolsetRegistry manages the registration of toolset creators by type
-type ToolsetRegistry struct {
-	creators map[string]ToolsetCreator
+// ToolsetRegistry manages the registration of toolset creators by type.
+type ToolsetRegistry interface {
+	CreateTool(ctx context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, agentName string) (tools.ToolSet, error)
 }
 
-// NewToolsetRegistry creates a new empty toolset registry
-func NewToolsetRegistry() *ToolsetRegistry {
-	return &ToolsetRegistry{
-		creators: make(map[string]ToolsetCreator),
+func NewDefaultToolsetRegistry() ToolsetRegistry {
+	return &toolsetRegistry{
+		creators: map[string]ToolsetCreator{
+			"todo":              createTodoTool,
+			"tasks":             createTasksTool,
+			"memory":            createMemoryTool,
+			"think":             createThinkTool,
+			"shell":             createShellTool,
+			"script":            createScriptTool,
+			"filesystem":        createFilesystemTool,
+			"fetch":             createFetchTool,
+			"mcp":               createMCPTool,
+			"api":               createAPITool,
+			"a2a":               createA2ATool,
+			"lsp":               createLSPTool,
+			"user_prompt":       createUserPromptTool,
+			"openapi":           createOpenAPITool,
+			"model_picker":      createModelPickerTool,
+			"background_agents": createBackgroundAgentsTool,
+			"rag":               createRAGTool,
+		},
 	}
 }
 
-// Register adds a new toolset creator for the given type
-func (r *ToolsetRegistry) Register(toolsetType string, creator ToolsetCreator) {
-	r.creators[toolsetType] = creator
-}
-
-// Get retrieves a toolset creator for the given type
-func (r *ToolsetRegistry) Get(toolsetType string) (ToolsetCreator, bool) {
-	creator, ok := r.creators[toolsetType]
-	return creator, ok
+// toolsetRegistry manages the registration of toolset creators by type.
+type toolsetRegistry struct {
+	creators map[string]ToolsetCreator
 }
 
 // CreateTool creates a toolset using the registered creator for the given type.
@@ -74,8 +85,8 @@ func (r *ToolsetRegistry) Get(toolsetType string) (ToolsetCreator, bool) {
 // already advertise a non-empty Name(): it only fills the gap left by
 // built-in toolsets that don't take a `name:` field in YAML, replacing
 // the previous fallback to fmt.Sprintf("%T", ts).
-func (r *ToolsetRegistry) CreateTool(ctx context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, agentName string) (tools.ToolSet, error) {
-	creator, ok := r.Get(toolset.Type)
+func (r *toolsetRegistry) CreateTool(ctx context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, agentName string) (tools.ToolSet, error) {
+	creator, ok := r.creators[toolset.Type]
 	if !ok {
 		return nil, fmt.Errorf("unknown toolset type: %s", toolset.Type)
 	}
@@ -84,29 +95,6 @@ func (r *ToolsetRegistry) CreateTool(ctx context.Context, toolset latest.Toolset
 		return nil, err
 	}
 	return tools.WithName(ts, cmp.Or(toolset.Name, toolset.Type)), nil
-}
-
-func NewDefaultToolsetRegistry() *ToolsetRegistry {
-	r := NewToolsetRegistry()
-	// Register all built-in toolset creators
-	r.Register("todo", createTodoTool)
-	r.Register("tasks", createTasksTool)
-	r.Register("memory", createMemoryTool)
-	r.Register("think", createThinkTool)
-	r.Register("shell", createShellTool)
-	r.Register("script", createScriptTool)
-	r.Register("filesystem", createFilesystemTool)
-	r.Register("fetch", createFetchTool)
-	r.Register("mcp", createMCPTool)
-	r.Register("api", createAPITool)
-	r.Register("a2a", createA2ATool)
-	r.Register("lsp", createLSPTool)
-	r.Register("user_prompt", createUserPromptTool)
-	r.Register("openapi", createOpenAPITool)
-	r.Register("model_picker", createModelPickerTool)
-	r.Register("background_agents", createBackgroundAgentsTool)
-	r.Register("rag", createRAGTool)
-	return r
 }
 
 // checkDirExists returns an error if the given directory does not exist or is

@@ -69,7 +69,7 @@ func TestGetToolsForAgent_ContinuesOnCreateToolError(t *testing.T) {
 
 	expander := js.NewJsExpander(runConfig.EnvProvider())
 
-	got, warnings := getToolsForAgent(t.Context(), a, ".", &runConfig, NewToolsetRegistry(), "test-config", expander)
+	got, warnings := getToolsForAgent(t.Context(), a, ".", &runConfig, &toolsetRegistry{}, "test-config", expander)
 
 	require.Empty(t, got)
 	require.NotEmpty(t, warnings)
