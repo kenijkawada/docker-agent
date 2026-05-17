@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/docker/docker-agent/pkg/app"
+	"github.com/docker/docker-agent/pkg/concurrent"
 	"github.com/docker/docker-agent/pkg/runtime"
 	"github.com/docker/docker-agent/pkg/shellpath"
 )
@@ -80,7 +81,7 @@ func runEventHook(command string, payload []byte) {
 	// it, and exits; the spawning goroutine ends with the subprocess.
 	cmd := exec.CommandContext(context.Background(), shell, append(argsPrefix, command)...)
 	cmd.Stdin = bytes.NewReader(payload)
-	var out boundedBuffer
+	var out boundedWriter
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	if err := cmd.Run(); err != nil {
@@ -88,25 +89,31 @@ func runEventHook(command string, payload []byte) {
 	}
 }
 
-// boundedBuffer captures up to maxHookOutput bytes from a hook subprocess
-// and silently discards the rest. It implements only io.Writer so it can be
-// assigned to exec.Cmd's Stdout/Stderr without forcing exec to buffer the
-// full output internally.
-type boundedBuffer struct {
-	buf bytes.Buffer
+// boundedWriter captures up to maxHookOutput bytes from a hook subprocess
+// and silently discards the rest. It satisfies io.Writer so it can be
+// assigned to exec.Cmd's Stdout/Stderr.
+//
+// exec.Cmd spawns separate copy goroutines for Stdout and Stderr, so the
+// underlying buffer must be safe for concurrent writes; that's what
+// [concurrent.Buffer] gives us. The cap is enforced softly: between
+// Len() and Write() another goroutine may slip in a chunk, so we may
+// over-shoot maxHookOutput by at most one Write per concurrent stream
+// (a few KB) — acceptable for diagnostic output.
+type boundedWriter struct {
+	buf concurrent.Buffer
 }
 
-func (b *boundedBuffer) Write(p []byte) (int, error) {
+func (b *boundedWriter) Write(p []byte) (int, error) {
 	if remaining := maxHookOutput - b.buf.Len(); remaining > 0 {
-		if len(p) > remaining {
-			b.buf.Write(p[:remaining])
-		} else {
-			b.buf.Write(p)
+		chunk := p
+		if len(chunk) > remaining {
+			chunk = chunk[:remaining]
 		}
+		_, _ = b.buf.Write(chunk)
 	}
 	return len(p), nil
 }
 
-func (b *boundedBuffer) String() string {
+func (b *boundedWriter) String() string {
 	return b.buf.String()
 }

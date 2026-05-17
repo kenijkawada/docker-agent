@@ -30,8 +30,8 @@ func TestParseOnEventFlags_BadFormat(t *testing.T) {
 	}
 }
 
-func TestBoundedBuffer_CapsAtMaxHookOutput(t *testing.T) {
-	var b boundedBuffer
+func TestBoundedWriter_CapsAtMaxHookOutput(t *testing.T) {
+	var b boundedWriter
 
 	n, err := b.Write(bytes.Repeat([]byte("a"), maxHookOutput-3))
 	require.NoError(t, err)
