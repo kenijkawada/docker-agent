@@ -24,7 +24,6 @@ import (
 	"github.com/docker/docker-agent/pkg/tools/builtin/todo"
 	"github.com/docker/docker-agent/pkg/tools/builtin/userprompt"
 	"github.com/docker/docker-agent/pkg/tools/mcp"
-	"github.com/docker/docker-agent/pkg/tools/workingdir"
 )
 
 // ToolsetCreator is a function that creates a toolset based on the provided configuration.
@@ -119,21 +118,3 @@ func (r *toolsetRegistry) CreateTool(ctx context.Context, toolset latest.Toolset
 	return tools.WithName(ts, cmp.Or(toolset.Name, toolset.Type)), nil
 }
 
-// resolveToolsetWorkingDir returns the effective working directory for a toolset process.
-//
-// Resolution rules:
-//   - If toolsetWorkingDir is empty, agentWorkingDir is returned unchanged.
-//   - Shell patterns (~ and ${VAR}/$VAR) are expanded before any further processing.
-//   - If the expanded path is absolute, it is returned as-is.
-//   - If the expanded path is relative and agentWorkingDir is non-empty,
-//     it is joined with agentWorkingDir and made absolute via filepath.Abs.
-//   - If the expanded path is relative and agentWorkingDir is empty,
-//     the relative path is returned unchanged (caller will inherit the process cwd).
-//
-// Note: unlike resolveToolsetPath, this helper does not enforce containment
-// within the agent working directory. working_dir is treated like command/args —
-// a trusted, operator-authored value where cross-tree references (e.g. a sibling
-// module root in a monorepo) are intentional and must not be silently blocked.
-func resolveToolsetWorkingDir(toolsetWorkingDir, agentWorkingDir string) string {
-	return workingdir.Resolve(toolsetWorkingDir, agentWorkingDir)
-}
