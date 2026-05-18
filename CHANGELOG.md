@@ -3,6 +3,64 @@
 All notable changes to this project will be documented in this file.
 
 
+## [v1.60.0] - 2026-05-18
+
+This release adds agent switching commands, MCP server discovery capabilities, and runtime model switching, along with UI improvements and stability fixes.
+
+## What's New
+- Adds slash commands for agent switching (e.g., `/plan` to hand off to planner agent)
+- Adds MCP catalog toolset for on-demand discovery and activation of remote MCP servers
+- Adds runtime model switching with GET/PATCH/POST endpoints for changing models during sessions
+- Adds sampling/createMessage support for MCP servers to use the host's LLM
+- Adds identity headers (X-Docker-Agent-Version, X-Docker-Desktop-Version) to built-in tool requests
+
+## Improvements
+- Renders user pasted content in TUI and collapses large pasted file contents (over 30 lines) into toggleable view
+- Routes mouse-wheel events to background dialogs instead of falling through to chat area
+- Uses Claude Sonnet 4.6 as default model in Anthropic provider
+- Switches to non-preview Gemini model
+- Adds configurable thinking expansion in user config
+
+## Bug Fixes
+- Fixes evaluation builds with legacy Docker builder by using printf instead of heredoc for /run.sh
+- Fixes crash prevention by explicitly sending tool_choice=auto in OpenAI requests with tools
+- Fixes Desktop version lookup to be TTL-based and context-independent
+- Fixes command resolution before agent switching to prevent lookup failures
+- Fixes concurrent access issues by using thread-safe methods and improving snapshot isolation
+
+## Technical Changes
+- Refactors toolset creation into individual packages with standardized naming
+- Improves concurrent package with thread-safe methods and uses it across multiple components
+- Centralizes context-limit resolution in runtime
+- Moves concurrency deduplication from trigger to review workflow in CI
+- Updates example configuration to use xai/grok-2-latest model
+
+### Pull Requests
+
+- [#2779](https://github.com/docker/docker-agent/pull/2779) - fix(evals): build /run.sh with printf so legacy builder works
+- [#2782](https://github.com/docker/docker-agent/pull/2782) - bump github.com/coder/acp-go-sdk from v0.12.2 to v0.13.0
+- [#2783](https://github.com/docker/docker-agent/pull/2783) - docs: update CHANGELOG.md for v1.59.0
+- [#2784](https://github.com/docker/docker-agent/pull/2784) - feat(tui): show user pasted content
+- [#2785](https://github.com/docker/docker-agent/pull/2785) - Use a non preview gemini model
+- [#2786](https://github.com/docker/docker-agent/pull/2786) - Use sonnet 4.6 as default in anthropic
+- [#2787](https://github.com/docker/docker-agent/pull/2787) - route mouse-wheel events to background dialogs
+- [#2789](https://github.com/docker/docker-agent/pull/2789) - ci: move concurrency dedup from trigger to review workflow
+- [#2790](https://github.com/docker/docker-agent/pull/2790) - feat: add slash commands for agent switching
+- [#2791](https://github.com/docker/docker-agent/pull/2791) - feat(api): accept model overrides on session creation and add runtime model switching endpoints
+- [#2793](https://github.com/docker/docker-agent/pull/2793) - docs(site): make the docs site feel like part of Docker, and explain what Docker Agent is
+- [#2794](https://github.com/docker/docker-agent/pull/2794) - feat: add mcp_catalog toolset for on-demand MCP server discovery
+- [#2795](https://github.com/docker/docker-agent/pull/2795) - feat: add X-Docker-Agent-Version and X-Docker-Desktop-Version headers to built-in tools
+- [#2802](https://github.com/docker/docker-agent/pull/2802) - Expand thinking configuration
+- [#2803](https://github.com/docker/docker-agent/pull/2803) - bump direct go dependencies
+- [#2806](https://github.com/docker/docker-agent/pull/2806) - fix(examples): use xai/grok-2-latest in grok.yaml
+- [#2807](https://github.com/docker/docker-agent/pull/2807) - Better tool registry
+- [#2810](https://github.com/docker/docker-agent/pull/2810) - Improve concurrent package
+- [#2811](https://github.com/docker/docker-agent/pull/2811) - bump direct go dependencies
+- [#2813](https://github.com/docker/docker-agent/pull/2813) - fix(openai): explicitly send tool_choice=auto when tools are provided
+- [#2814](https://github.com/docker/docker-agent/pull/2814) - fix(runtime): use provider_opts.context_size for compaction
+- [#2815](https://github.com/docker/docker-agent/pull/2815) - feat(mcp): add sampling/createMessage support
+
+
 ## [v1.59.0] - 2026-05-13
 
 This release adds XML tool call parsing for better model compatibility, performance improvements for TUI rendering, and enhanced remote runtime capabilities.
@@ -2742,3 +2800,5 @@ This release improves the terminal user interface with better error handling and
 [v1.58.0]: https://github.com/docker/docker-agent/releases/tag/v1.58.0
 
 [v1.59.0]: https://github.com/docker/docker-agent/releases/tag/v1.59.0
+
+[v1.60.0]: https://github.com/docker/docker-agent/releases/tag/v1.60.0
