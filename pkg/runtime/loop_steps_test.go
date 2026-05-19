@@ -292,3 +292,75 @@ func TestHandleStreamError_GenericError_FatalAndEmitsError(t *testing.T) {
 	}
 	assert.True(t, sawError, "generic error should emit ErrorEvent")
 }
+
+// TestHandleStreamError_WireOverflowSkipsCompaction verifies that wire-level
+// overflow does not trigger auto-compaction. Compaction would resend the same
+// oversized request that just got rejected, so it is guaranteed to fail; we
+// surface the error directly instead.
+func TestHandleStreamError_WireOverflowSkipsCompaction(t *testing.T) {
+	t.Parallel()
+
+	rt, a := newTestRuntime(t)
+	sess := session.New()
+	events := make(chan Event, 16)
+	_, sp := noop.NewTracerProvider().Tracer("t").Start(t.Context(), "x")
+
+	overflow := &modelerrors.ContextOverflowError{
+		Underlying: errors.New("HTTP 413: Payload Too Large"),
+		Kind:       modelerrors.OverflowKindWire,
+	}
+	overflowCount := 0
+
+	outcome := rt.handleStreamError(t.Context(), sess, a, overflow, 1000, &overflowCount, sp, NewChannelSink(events))
+
+	assert.Equal(t, streamErrorFatal, outcome, "wire overflow must not trigger compaction retry")
+	assert.Equal(t, 0, overflowCount, "wire overflow must not bump the compaction counter")
+
+	got := drainEvents(events)
+	var sawError bool
+	var sawWarning bool
+	var errCode string
+	for _, ev := range got {
+		switch e := ev.(type) {
+		case *ErrorEvent:
+			sawError = true
+			errCode = e.Code
+		case *WarningEvent:
+			sawWarning = true
+		}
+	}
+	assert.True(t, sawError, "wire overflow should emit an ErrorEvent")
+	assert.False(t, sawWarning, "wire overflow should not emit the compaction warning")
+	assert.Equal(t, ErrorCodeRequestTooLarge, errCode, "ErrorEvent.Code should distinguish wire overflow")
+}
+
+// TestHandleStreamError_MediaOverflowSkipsCompaction verifies the same skip
+// behaviour for media-size rejections. Without media-stripping during
+// compaction, the offending attachment would be resent and fail again.
+func TestHandleStreamError_MediaOverflowSkipsCompaction(t *testing.T) {
+	t.Parallel()
+
+	rt, a := newTestRuntime(t)
+	sess := session.New()
+	events := make(chan Event, 16)
+	_, sp := noop.NewTracerProvider().Tracer("t").Start(t.Context(), "x")
+
+	overflow := &modelerrors.ContextOverflowError{
+		Underlying: errors.New("image exceeds 5 MB maximum"),
+		Kind:       modelerrors.OverflowKindMedia,
+	}
+	overflowCount := 0
+
+	outcome := rt.handleStreamError(t.Context(), sess, a, overflow, 1000, &overflowCount, sp, NewChannelSink(events))
+
+	assert.Equal(t, streamErrorFatal, outcome, "media overflow must not trigger compaction retry")
+	assert.Equal(t, 0, overflowCount, "media overflow must not bump the compaction counter")
+
+	var errCode string
+	for _, ev := range drainEvents(events) {
+		if e, ok := ev.(*ErrorEvent); ok {
+			errCode = e.Code
+		}
+	}
+	assert.Equal(t, ErrorCodeMediaTooLarge, errCode, "ErrorEvent.Code should distinguish media overflow")
+}

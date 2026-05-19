@@ -161,22 +161,42 @@ func (r *LocalRuntime) handleStreamError(
 	// request instead of surfacing raw errors. We allow at most
 	// r.maxOverflowCompactions consecutive attempts to avoid an infinite
 	// loop when compaction cannot reduce the context enough.
+	//
+	// Compaction only helps for token-count overflow ([OverflowKindTokens]):
+	// summarising older turns reduces the input token count.
+	//
+	// For wire-level overflow ([OverflowKindWire]) the request body itself
+	// is over the provider's cap; the latest turn alone is too large and
+	// would still have to be sent during compaction. For media overflow
+	// ([OverflowKindMedia]) we have no media-stripping path today, so a
+	// retry would resend the same oversized attachment. In both cases the
+	// recovery attempt always fails, so we skip it and surface the error
+	// directly — the user can act on it (smaller paste, smaller file)
+	// faster, without burning a second provider call.
 	if _, ok := errors.AsType[*modelerrors.ContextOverflowError](err); ok && r.sessionCompaction && *overflowCompactions < r.maxOverflowCompactions {
-		*overflowCompactions++
-		slog.WarnContext(ctx, "Context window overflow detected, attempting auto-compaction",
+		kind := modelerrors.OverflowKindOf(err)
+		if kind == modelerrors.OverflowKindTokens {
+			*overflowCompactions++
+			slog.WarnContext(ctx, "Context window overflow detected, attempting auto-compaction",
+				"agent", a.Name(),
+				"session_id", sess.ID,
+				"input_tokens", sess.InputTokens,
+				"output_tokens", sess.OutputTokens,
+				"context_limit", contextLimit,
+				"attempt", *overflowCompactions,
+			)
+			events.Emit(Warning(
+				"The conversation has exceeded the model's context window. Automatically compacting the conversation history...",
+				a.Name(),
+			))
+			r.compactWithReason(ctx, sess, "", compactionReasonOverflow, events)
+			return streamErrorRetry
+		}
+		slog.InfoContext(ctx, "Skipping auto-compaction for non-token overflow",
 			"agent", a.Name(),
 			"session_id", sess.ID,
-			"input_tokens", sess.InputTokens,
-			"output_tokens", sess.OutputTokens,
-			"context_limit", contextLimit,
-			"attempt", *overflowCompactions,
+			"overflow_kind", string(kind),
 		)
-		events.Emit(Warning(
-			"The conversation has exceeded the model's context window. Automatically compacting the conversation history...",
-			a.Name(),
-		))
-		r.compactWithReason(ctx, sess, "", compactionReasonOverflow, events)
-		return streamErrorRetry
 	}
 
 	streamSpan.RecordError(err)
