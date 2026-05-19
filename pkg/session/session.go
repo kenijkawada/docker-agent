@@ -431,6 +431,55 @@ func (s *Session) ApplyCompaction(inputTokens, outputTokens int64, item Item) {
 	s.mu.Unlock()
 }
 
+// RewriteLatestUserMessage atomically rewrites the most recent user
+// message in s by passing its chat.Message to rewrite and replacing
+// it with the returned value. The slot is found and updated under
+// s.mu so concurrent readers (snapshotItems, persistence) cannot
+// observe a torn state.
+//
+// rewrite is called at most once. If it returns false the message is
+// left unchanged. The boolean return reports whether anything was
+// rewritten — false when there is no user message in s or when
+// rewrite opted out.
+//
+// This is the runtime's hook for in-place message hygiene after a
+// failure that would otherwise poison the session — see the wire/
+// media overflow recovery in pkg/runtime.
+//
+// Scope: only items at the top level of s.Messages are considered.
+// Sub-session items (Item.SubSession) are skipped; the function does
+// not recurse into them. Callers that route user turns through a
+// sub-session must rewrite the target message on the sub-session
+// directly. The contract is intentional — sub-sessions own their
+// own conversation transcript and the parent should not reach into
+// them without going through their store.
+//
+// The rewrite is in-memory only. To mirror it to the session store
+// (so it survives a docker-agent restart), the caller must follow up
+// with a separate [Store.UpdateMessage] — which today requires a
+// persistence ID that the runtime does not yet round-trip through
+// [Store.AddMessage]. Closing that gap is a separate piece of work.
+func (s *Session) RewriteLatestUserMessage(rewrite func(chat.Message) (chat.Message, bool)) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range slices.Backward(s.Messages) {
+		item := &s.Messages[i]
+		if !item.IsMessage() {
+			continue
+		}
+		if item.Message.Message.Role != chat.MessageRoleUser {
+			continue
+		}
+		newMsg, ok := rewrite(item.Message.Message)
+		if !ok {
+			return false
+		}
+		item.Message.Message = newMsg
+		return true
+	}
+	return false
+}
+
 // AddSubSession adds a sub-session to the session
 func (s *Session) AddSubSession(subSession *Session) {
 	s.mu.Lock()

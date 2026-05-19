@@ -156,26 +156,28 @@ func (r *LocalRuntime) handleStreamError(
 		return streamErrorFatal
 	}
 
-	// Auto-recovery: if the error is a context overflow and session
-	// compaction is enabled, compact the conversation and retry the
-	// request instead of surfacing raw errors. We allow at most
-	// r.maxOverflowCompactions consecutive attempts to avoid an infinite
-	// loop when compaction cannot reduce the context enough.
+	// Overflow handling has two independent concerns:
 	//
-	// Compaction only helps for token-count overflow ([OverflowKindTokens]):
-	// summarising older turns reduces the input token count.
+	//   1. Auto-compaction (token overflow only): summarise older
+	//      turns to fit the context window, then retry. Gated by
+	//      r.sessionCompaction and the per-run attempt cap.
 	//
-	// For wire-level overflow ([OverflowKindWire]) the request body itself
-	// is over the provider's cap; the latest turn alone is too large and
-	// would still have to be sent during compaction. For media overflow
-	// ([OverflowKindMedia]) we have no media-stripping path today, so a
-	// retry would resend the same oversized attachment. In both cases the
-	// recovery attempt always fails, so we skip it and surface the error
-	// directly — the user can act on it (smaller paste, smaller file)
-	// faster, without burning a second provider call.
-	if _, ok := errors.AsType[*modelerrors.ContextOverflowError](err); ok && r.sessionCompaction && *overflowCompactions < r.maxOverflowCompactions {
+	//   2. Session hygiene (wire/media overflow): rewrite the
+	//      offending user message so the same oversized payload
+	//      cannot reload on the next call and re-poison the session.
+	//      Always runs when the kind warrants it, independent of
+	//      the compaction config — the hygiene step does not retry
+	//      and is correct even when compaction is disabled.
+	if _, ok := errors.AsType[*modelerrors.ContextOverflowError](err); ok {
 		kind := modelerrors.OverflowKindOf(err)
-		if kind == modelerrors.OverflowKindTokens {
+
+		// Token overflow: compaction is the right recovery — older
+		// turns can be summarised to free up context. Wire/media do
+		// not benefit from compaction (the latest turn alone is
+		// over the cap; resending it during compaction would just
+		// fail again), so we fall through to the hygiene step
+		// below for those.
+		if kind == modelerrors.OverflowKindTokens && r.sessionCompaction && *overflowCompactions < r.maxOverflowCompactions {
 			*overflowCompactions++
 			slog.WarnContext(ctx, "Context window overflow detected, attempting auto-compaction",
 				"agent", a.Name(),
@@ -192,11 +194,15 @@ func (r *LocalRuntime) handleStreamError(
 			r.compactWithReason(ctx, sess, "", compactionReasonOverflow, events)
 			return streamErrorRetry
 		}
-		slog.InfoContext(ctx, "Skipping auto-compaction for non-token overflow",
-			"agent", a.Name(),
-			"session_id", sess.ID,
-			"overflow_kind", string(kind),
-		)
+
+		// Hygiene scrub for wire/media overflow. Runs independently
+		// of r.sessionCompaction: this rewrites a single message in
+		// place, it does not retry, and the same-process
+		// session-poisoning bug it fixes occurs regardless of
+		// whether the user opted into auto-compaction.
+		if kind == modelerrors.OverflowKindWire || kind == modelerrors.OverflowKindMedia {
+			r.recoverFromOversizedTurn(ctx, sess, kind, events)
+		}
 	}
 
 	streamSpan.RecordError(err)
