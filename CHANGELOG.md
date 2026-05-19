@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 
 
+## [v1.61.0] - 2026-05-19
+
+This is a maintenance release that updates documentation for the previous version.
+
+## Technical Changes
+- Updates CHANGELOG.md with release notes for v1.60.0
+
+### Pull Requests
+
+- [#2817](https://github.com/docker/docker-agent/pull/2817) - docs: update CHANGELOG.md for v1.60.0
+
+
 ## [v1.60.0] - 2026-05-18
 
 This release adds agent switching commands, MCP server discovery capabilities, and runtime model switching, along with UI improvements and stability fixes.
@@ -2802,3 +2814,5 @@ This release improves the terminal user interface with better error handling and
 [v1.59.0]: https://github.com/docker/docker-agent/releases/tag/v1.59.0
 
 [v1.60.0]: https://github.com/docker/docker-agent/releases/tag/v1.60.0
+
+[v1.61.0]: https://github.com/docker/docker-agent/releases/tag/v1.61.0
