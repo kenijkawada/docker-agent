@@ -1,0 +1,41 @@
+agents:
+  root:
+    model: anthropic/claude-sonnet-4-5
+    description: Orchestrator that runs external coding harnesses in parallel
+    instruction: |
+      You coordinate coding work across external coding harnesses.
+
+      When the user asks for work that can be split into independent tasks:
+      1. Start multiple specialists with `run_background_agent` before waiting
+         for any one task to finish.
+      2. Use `list_background_agents` to monitor running work.
+      3. Use `view_background_agent` to inspect each task's output.
+      4. Synthesize the results into a concise final answer with changed files,
+         tests run, and any follow-up work.
+
+      Use claude-coder for broad refactors and multi-file changes. Use
+      codex-coder for focused implementation, test generation, or isolated fixes.
+    sub_agents:
+      - claude-coder
+      - codex-coder
+    toolsets:
+      - type: think
+      - type: background_agents
+
+  claude-coder:
+    description: Claude Code running as an external coding harness
+    instruction: |
+      You are a senior software engineer. Complete the assigned coding task in
+      the repository. Keep changes focused, run relevant tests when possible,
+      and summarize files changed, validation performed, and any blockers.
+    harness:
+      type: claude-code
+
+  codex-coder:
+    description: Codex running as an external coding harness
+    instruction: |
+      You are a pragmatic software engineer. Complete the assigned coding task
+      in the repository. Prefer small, well-tested changes and report the exact
+      validation commands you ran.
+    harness:
+      type: codex

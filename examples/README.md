@@ -159,6 +159,8 @@ remote MCP endpoints.
 | [`writer.yaml`](writer.yaml) | Story writing supervisor with specialized sub-agents. |
 | [`finance.yaml`](finance.yaml) | Financial research orchestrating analysts. |
 | [`background_agents.yaml`](background_agents.yaml) | Parallel research delegated to background sub-agents. |
+| [`coding_harnesses.yaml`](coding_harnesses.yaml) | Orchestrator delegating coding tasks to external harness-backed sub-agents. |
+| [`coding_harness_background_agents.yaml`](coding_harness_background_agents.yaml) | Orchestrator running external coding harnesses concurrently via background agents. |
 | [`dev-team.yaml`](dev-team.yaml) | Product-manager-led team (designer + engineer) with shared memory. |
 | [`multi-code.yaml`](multi-code.yaml) | Tech-lead routing tasks to a frontend and a Go expert. |
 | [`coder.yaml`](coder.yaml) | Coding agent with planner, implementer, and librarian sub-agents. |

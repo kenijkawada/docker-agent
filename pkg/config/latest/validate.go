@@ -37,6 +37,9 @@ func (t *Config) Validate() error {
 		if err := agent.validateFallback(); err != nil {
 			return err
 		}
+		if err := agent.validateHarness(); err != nil {
+			return err
+		}
 
 		for j := range agent.Toolsets {
 			if err := agent.Toolsets[j].validate(); err != nil {
@@ -65,6 +68,40 @@ func (a *AgentConfig) validateFallback() error {
 	}
 	if a.Fallback.Cooldown.Duration < 0 {
 		return errors.New("fallback.cooldown must be non-negative")
+	}
+
+	return nil
+}
+
+func (a *AgentConfig) validateHarness() error {
+	if a.Harness == nil {
+		return nil
+	}
+
+	h := a.Harness
+	switch h.Type {
+	case "claude-code", "codex", "pi", "opencode":
+	case "":
+		return errors.New("harness.type is required")
+	default:
+		return fmt.Errorf("unsupported harness.type %q (must be one of: claude-code, codex, pi, opencode)", h.Type)
+	}
+
+	if h.Effort != "" {
+		if h.Type != "claude-code" {
+			return errors.New("harness.effort can only be used with harness.type 'claude-code'")
+		}
+		switch h.Effort {
+		case "low", "medium", "high", "max":
+		default:
+			return errors.New("harness.effort must be one of: low, medium, high, max")
+		}
+	}
+	if h.Agent != "" && h.Type != "opencode" {
+		return errors.New("harness.agent can only be used with harness.type 'opencode'")
+	}
+	if h.Thinking && h.Type != "opencode" {
+		return errors.New("harness.thinking can only be used with harness.type 'opencode'")
 	}
 
 	return nil

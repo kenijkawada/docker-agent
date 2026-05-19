@@ -1,0 +1,20 @@
+agents:
+  root:
+    model: anthropic/claude-sonnet-4-5
+    description: Orchestrator
+    instruction: Route coding tasks to the appropriate specialist.
+    sub_agents:
+      - claude-coder
+      - codex-coder
+
+  claude-coder:
+    description: Claude Code for complex refactors
+    instruction: You are a senior software engineer.
+    harness:
+      type: claude-code
+
+  codex-coder:
+    description: Codex for code generation
+    instruction: You are a software engineer.
+    harness:
+      type: codex

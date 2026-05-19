@@ -182,33 +182,41 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
 			opts = append(opts, agent.WithCache(c))
 		}
 
-		models, err := getModelsForAgent(ctx, cfg, &agentConfig, autoModel, runConfig)
-		if err != nil {
-			// Return auto model fallback errors and DMR not installed errors directly
-			// without wrapping to provide cleaner messages
-			if _, ok := errors.AsType[*config.AutoModelFallbackError](err); ok || errors.Is(err, dmr.ErrNotInstalled) {
-				return nil, err
+		if agentConfig.Harness != nil {
+			harnessCfg := *agentConfig.Harness
+			if harnessCfg.Model == "" {
+				harnessCfg.Model = agentConfig.Model
 			}
-			return nil, fmt.Errorf("failed to get models: %w", err)
-		}
-		for _, model := range models {
-			opts = append(opts, agent.WithModel(model))
-		}
-
-		// Load fallback models if configured
-		fallbackModelRefs := agentConfig.GetFallbackModels()
-		if len(fallbackModelRefs) > 0 {
-			fallbackModels, err := getFallbackModelsForAgent(ctx, cfg, &agentConfig, runConfig)
+			opts = append(opts, agent.WithHarness(&harnessCfg))
+		} else {
+			models, err := getModelsForAgent(ctx, cfg, &agentConfig, autoModel, runConfig)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get fallback models: %w", err)
+				// Return auto model fallback errors and DMR not installed errors directly
+				// without wrapping to provide cleaner messages
+				if _, ok := errors.AsType[*config.AutoModelFallbackError](err); ok || errors.Is(err, dmr.ErrNotInstalled) {
+					return nil, err
+				}
+				return nil, fmt.Errorf("failed to get models: %w", err)
 			}
-			for _, model := range fallbackModels {
-				opts = append(opts, agent.WithFallbackModel(model))
+			for _, model := range models {
+				opts = append(opts, agent.WithModel(model))
 			}
-			opts = append(opts,
-				agent.WithFallbackRetries(agentConfig.GetFallbackRetries()),
-				agent.WithFallbackCooldown(agentConfig.GetFallbackCooldown()),
-			)
+
+			// Load fallback models if configured
+			fallbackModelRefs := agentConfig.GetFallbackModels()
+			if len(fallbackModelRefs) > 0 {
+				fallbackModels, err := getFallbackModelsForAgent(ctx, cfg, &agentConfig, runConfig)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get fallback models: %w", err)
+				}
+				for _, model := range fallbackModels {
+					opts = append(opts, agent.WithFallbackModel(model))
+				}
+				opts = append(opts,
+					agent.WithFallbackRetries(agentConfig.GetFallbackRetries()),
+					agent.WithFallbackCooldown(agentConfig.GetFallbackCooldown()),
+				)
+			}
 		}
 
 		agentTools, warnings := getToolsForAgent(ctx, &agentConfig, parentDir, runConfig, loadOpts.toolsetRegistry, configName, expander)
@@ -267,7 +275,7 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
 	// Build agent default models map
 	agentDefaultModels := make(map[string]string)
 	for _, agent := range cfg.Agents {
-		if agent.Model != "" {
+		if agent.Harness == nil && agent.Model != "" {
 			agentDefaultModels[agent.Name] = agent.Model
 		}
 	}

@@ -202,6 +202,30 @@ func TestOverrideModel(t *testing.T) {
 	}
 }
 
+func TestLoadHarnessAgentWithoutModel(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	data := []byte(`agents:
+  root:
+    model: openai/gpt-4o
+    sub_agents: [coder]
+  coder:
+    description: External coder
+    instruction: You are a coding agent.
+    harness:
+      type: codex
+`)
+
+	team, err := Load(t.Context(), config.NewBytesSource("harness.yaml", data), &config.RuntimeConfig{})
+	require.NoError(t, err)
+
+	coder, err := team.Agent("coder")
+	require.NoError(t, err)
+	require.True(t, coder.HasHarness())
+	require.Equal(t, "codex", coder.Harness().Type)
+	require.Nil(t, coder.Model(t.Context()))
+}
+
 func TestToolsetInstructions(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 

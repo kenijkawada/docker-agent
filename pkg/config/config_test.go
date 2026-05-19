@@ -466,6 +466,49 @@ func TestApplyModelOverrides(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_HarnessAgentsSkipModelValidation(t *testing.T) {
+	t.Parallel()
+
+	cfg := &latest.Config{
+		Agents: []latest.AgentConfig{
+			{Name: "root", Model: "openai/gpt-4o", SubAgents: []string{"coder"}},
+			{Name: "coder", Harness: &latest.HarnessConfig{Type: "codex"}},
+		},
+	}
+
+	require.NoError(t, validateConfig(cfg))
+	_, exists := cfg.Models[""]
+	assert.False(t, exists)
+}
+
+func TestValidateConfig_HarnessValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		harness *latest.HarnessConfig
+		wantErr string
+	}{
+		{name: "valid claude code", harness: &latest.HarnessConfig{Type: "claude-code", Effort: "high"}},
+		{name: "missing type", harness: &latest.HarnessConfig{}, wantErr: "harness.type is required"},
+		{name: "bad type", harness: &latest.HarnessConfig{Type: "vim"}, wantErr: "unsupported harness.type"},
+		{name: "bad effort", harness: &latest.HarnessConfig{Type: "claude-code", Effort: "ultra"}, wantErr: "harness.effort must be one of"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &latest.Config{Agents: []latest.AgentConfig{{Name: "root", Harness: tt.harness}}}
+			err := cfg.Validate()
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestValidateConfig_ExternalSubAgentReferences(t *testing.T) {
 	t.Parallel()
 

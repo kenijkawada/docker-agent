@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/docker/docker-agent/blob/main/agent-schema.json",
   "title": "Docker Agent Configuration",
-  "description": "Configuration schema for Docker Agent v8",
+  "description": "Configuration schema for Docker Agent v9",
   "type": "object",
   "properties": {
     "version": {
@@ -17,7 +17,8 @@
         "5",
         "6",
         "7",
-        "8"
+        "8",
+        "9"
       ],
       "examples": [
         "0",
@@ -28,7 +29,8 @@
         "5",
         "6",
         "7",
-        "8"
+        "8",
+        "9"
       ]
     },
     "providers": {
@@ -530,6 +532,10 @@
           "type": "string",
           "description": "Instructions for the agent"
         },
+        "harness": {
+          "$ref": "#/definitions/HarnessConfig",
+          "description": "External coding harness to run this agent with instead of a docker-agent model provider"
+        },
         "code_mode_tools": {
           "type": "boolean",
           "description": "Enable Code Mode for tools"
@@ -747,6 +753,52 @@
           "description": "Name of a sub-agent to switch to when this command is invoked. The agent must be defined in the team configuration. When set without 'instruction', any text typed after the slash command is forwarded as a prompt to the target agent."
         }
       },
+      "additionalProperties": false
+    },
+    "HarnessConfig": {
+      "type": "object",
+      "description": "Configuration for running an agent through an external coding-agent CLI via github.com/rumpl/harness",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "External coding harness provider to use",
+          "enum": [
+            "claude-code",
+            "codex",
+            "pi",
+            "opencode"
+          ],
+          "examples": [
+            "claude-code",
+            "codex"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "description": "Optional model name passed to the external harness. When omitted, the external CLI uses its own default model."
+        },
+        "effort": {
+          "type": "string",
+          "description": "Claude Code effort level forwarded as --effort",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ]
+        },
+        "agent": {
+          "type": "string",
+          "description": "opencode agent name forwarded as --agent"
+        },
+        "thinking": {
+          "type": "boolean",
+          "description": "Enable opencode thinking output"
+        }
+      },
+      "required": [
+        "type"
+      ],
       "additionalProperties": false
     },
     "FallbackConfig": {

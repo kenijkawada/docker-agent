@@ -87,6 +87,7 @@ func TestSchemaMatchesGoTypes(t *testing.T) {
 	definitionMap := map[string]reflect.Type{
 		"AgentConfig":           reflect.TypeFor[latest.AgentConfig](),
 		"FallbackConfig":        reflect.TypeFor[latest.FallbackConfig](),
+		"HarnessConfig":         reflect.TypeFor[latest.HarnessConfig](),
 		"ModelConfig":           reflect.TypeFor[latest.ModelConfig](),
 		"Metadata":              reflect.TypeFor[latest.Metadata](),
 		"ProviderConfig":        reflect.TypeFor[latest.ProviderConfig](),

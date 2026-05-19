@@ -42,6 +42,7 @@ type Agent struct {
 	addPromptFiles          []string
 	tools                   []tools.Tool
 	commands                types.Commands
+	harness                 *latest.HarnessConfig
 	hooks                   *latest.HooksConfig
 	cache                   *cache.Cache
 
@@ -160,6 +161,9 @@ func (a *Agent) Model(ctx context.Context) provider.Provider {
 		selected = (*overrides)[rand.Intn(len(*overrides))]
 		poolSize = len(*overrides)
 	} else {
+		if len(a.models) == 0 {
+			return nil
+		}
 		selected = a.models[rand.Intn(len(a.models))]
 		poolSize = len(a.models)
 	}
@@ -266,6 +270,15 @@ func (a *Agent) FallbackCooldown() time.Duration {
 // Commands returns the named commands configured for this agent.
 func (a *Agent) Commands() types.Commands {
 	return a.commands
+}
+
+// Harness returns the external coding harness configuration for this agent.
+func (a *Agent) Harness() *latest.HarnessConfig {
+	return a.harness
+}
+
+func (a *Agent) HasHarness() bool {
+	return a.harness != nil
 }
 
 // Hooks returns the hooks configuration for this agent.

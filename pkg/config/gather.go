@@ -53,8 +53,11 @@ func gatherMissingEnvVars(ctx context.Context, cfg *latest.Config, modelsGateway
 func GatherEnvVarsForModels(cfg *latest.Config) []string {
 	requiredEnv := map[string]bool{}
 
-	// Inspect only the models that are actually used by agents
+	// Inspect only the models that are actually used by docker-agent model-backed agents.
 	for _, agent := range cfg.Agents {
+		if agent.Harness != nil {
+			continue
+		}
 		modelNames := strings.SplitSeq(agent.Model, ",")
 		for modelName := range modelNames {
 			modelName = strings.TrimSpace(modelName)

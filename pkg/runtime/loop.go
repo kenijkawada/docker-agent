@@ -264,6 +264,11 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
 		r.finalizeEventChannel(ctx, sess, streamReason, prevElicitationCh, events)
 	}()
 
+	if a.HasHarness() {
+		streamReason = r.runHarnessAgent(ctx, sess, a, slices.Concat(ls.sessionStartMsgs, ls.userPromptMsgs), sink)
+		return
+	}
+
 	// Response cache lookup. On a hit, replay the stored answer and
 	// skip the model entirely. The matching storage half is
 	// implemented as the cache_response stop-hook builtin (see

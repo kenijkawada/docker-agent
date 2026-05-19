@@ -170,6 +170,17 @@ func WithCommands(commands types.Commands) Opt {
 	}
 }
 
+func WithHarness(harness *latest.HarnessConfig) Opt {
+	return func(a *Agent) {
+		if harness == nil {
+			a.harness = nil
+			return
+		}
+		cfg := *harness
+		a.harness = &cfg
+	}
+}
+
 func WithLoadTimeWarnings(warnings []string) Opt {
 	return func(a *Agent) {
 		for _, w := range warnings {

@@ -550,7 +550,7 @@ func NewLocalRuntime(agents *team.Team, opts ...Opt) (*LocalRuntime, error) {
 		return nil, err
 	}
 
-	if defaultAgent.Model(context.TODO()) == nil {
+	if defaultAgent.Model(context.TODO()) == nil && !defaultAgent.HasHarness() {
 		return nil, fmt.Errorf("agent %s has no valid model", defaultAgent.Name())
 	}
 
@@ -855,6 +855,9 @@ func (r *LocalRuntime) TitleGenerator() *sessiontitle.Generator {
 // getAgentModelID returns the model ID for an agent. The zero ID is
 // returned when no model is configured.
 func getAgentModelID(a *agent.Agent) modelsdev.ID {
+	if a == nil {
+		return modelsdev.ID{}
+	}
 	if model := a.Model(context.TODO()); model != nil {
 		return model.ID()
 	}
@@ -1013,7 +1016,11 @@ func (r *LocalRuntime) EmitStartupInfo(ctx context.Context, sess *session.Sessio
 	// Emit agent and team information immediately for fast sidebar display
 	// Use getEffectiveModelID to account for active fallback cooldowns
 	modelID := r.getEffectiveModelID(a)
-	if !send(AgentInfo(a.Name(), modelID.String(), a.Description(), a.WelcomeMessage())) {
+	modelLabel := modelID.String()
+	if a.HasHarness() {
+		modelLabel = agentModelLabel(a)
+	}
+	if !send(AgentInfo(a.Name(), modelLabel, a.Description(), a.WelcomeMessage())) {
 		return
 	}
 	if !send(TeamInfo(r.agentDetailsFromTeam(), r.CurrentAgentName())) {

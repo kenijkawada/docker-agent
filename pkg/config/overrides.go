@@ -84,6 +84,10 @@ func ensureModelsExist(cfg *latest.Config) error {
 	// Expand alloy model compositions in agent model references and ensure resulting
 	// referenced models exist.
 	for _, agent := range cfg.Agents {
+		if agent.Harness != nil {
+			continue
+		}
+
 		expandedModel, err := expandAlloyModelRef(cfg, agent.Model)
 		if err != nil {
 			return fmt.Errorf("agent '%s': %w", agent.Name, err)

@@ -368,6 +368,23 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.String())
 }
 
+// HarnessConfig configures an agent that delegates execution to an external
+// coding-agent CLI through github.com/rumpl/harness instead of using a
+// docker-agent model provider.
+type HarnessConfig struct {
+	// Type identifies the external harness provider: claude-code, codex, pi, or opencode.
+	Type string `json:"type,omitempty"`
+	// Model is passed to harnesses that accept a model flag. When omitted,
+	// docker-agent lets the external CLI use its own default model.
+	Model string `json:"model,omitempty"`
+	// Effort is forwarded to Claude Code's --effort flag.
+	Effort string `json:"effort,omitempty"`
+	// Agent is forwarded to opencode's --agent flag.
+	Agent string `json:"agent,omitempty"`
+	// Thinking enables opencode's --thinking flag.
+	Thinking bool `json:"thinking,omitempty"`
+}
+
 // AgentConfig represents a single agent configuration
 type AgentConfig struct {
 	Name           string
@@ -377,6 +394,7 @@ type AgentConfig struct {
 	WelcomeMessage string          `json:"welcome_message,omitempty"`
 	Toolsets       []Toolset       `json:"toolsets,omitempty"`
 	Instruction    string          `json:"instruction,omitempty"`
+	Harness        *HarnessConfig  `json:"harness,omitempty"`
 	SubAgents      []string        `json:"sub_agents,omitempty"`
 	Handoffs       []string        `json:"handoffs,omitempty"`
 
