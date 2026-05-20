@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/99designs/keyring"
 )
@@ -52,7 +53,17 @@ func openKeyring() (keyring.Keyring, error) {
 // defaultStore returns the process-wide token store, opening the OS
 // keyring lazily on first call. Multiple MCP toolsets share its in-memory
 // cache so they don't each trigger a credential prompt on construction.
+//
+// Under `go test` we always return an in-memory store: any test that
+// constructs a real *mcp.Toolset (directly or via the mcpcatalog
+// builtin) would otherwise reach into the real OS keychain on the first
+// outbound HTTP request, popping a macOS password prompt for the
+// `docker-agent-oauth` keychain item on developer machines that have a
+// token from a prior login.
 var defaultStore = sync.OnceValue(func() OAuthTokenStore {
+	if testing.Testing() {
+		return NewInMemoryTokenStore()
+	}
 	ring, err := openKeyring()
 	if err != nil {
 		slog.Warn("OS keyring not available, falling back to in-memory token store", "error", err)
