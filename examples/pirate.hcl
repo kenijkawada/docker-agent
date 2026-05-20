@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 agent "root" {
   description = "An agent that talks like a pirate"
   instruction = "Always answer by talking like a pirate."

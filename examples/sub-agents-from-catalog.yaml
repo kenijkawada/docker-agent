@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # This example demonstrates using agents from the catalog as sub-agents.
 # Sub-agents can be defined locally in the same config, or referenced from
 # external sources such as OCI registries (e.g., the Docker agent catalog).

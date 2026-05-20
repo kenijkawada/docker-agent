@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 metadata:
   readme: |
     This example demonstrates a Tic-Tac-Toe game between two agents, "player_blue" and "player_red", 

@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # This example demonstrates the background_agents toolset, which lets a
 # coordinator dispatch work to multiple sub-agents in parallel rather than
 # waiting for each one sequentially.

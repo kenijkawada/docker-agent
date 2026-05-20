@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 model "claude" {
   provider = "anthropic"
   model    = "claude-opus-4-6"

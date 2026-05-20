@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # This example demonstrates the model_picker toolset, which lets the agent
 # dynamically switch between models mid-conversation. The agent can pick the
 # best model for each sub-task (e.g. a fast model for simple questions, a

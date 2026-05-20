@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 models:
   model:
     provider: anthropic

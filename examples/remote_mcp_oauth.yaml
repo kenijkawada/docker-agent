@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Example: Remote MCP server with explicit OAuth credentials.
 # Use this when connecting to MCP servers that do NOT support
 # Dynamic Client Registration (RFC 7591), such as Slack or GitHub.

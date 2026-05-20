@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # OpenAPI Toolset Example
 #
 # This agent uses the "openapi" toolset type to automatically generate

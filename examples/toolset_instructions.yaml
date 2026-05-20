@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # This example demonstrates how to use {ORIGINAL_INSTRUCTIONS} in a
 # toolset instruction to *enrich* the built-in instructions instead of
 # replacing them.

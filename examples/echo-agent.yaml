@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 metadata:
   readme: |
     This is a simple echo agent configuration file.

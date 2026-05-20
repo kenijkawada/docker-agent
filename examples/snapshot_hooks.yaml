@@ -1,4 +1,3 @@
-#!/usr/bin/env docker agent run
 #
 # Shadow-git snapshot hook
 # ------------------------

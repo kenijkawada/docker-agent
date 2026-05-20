@@ -6,8 +6,7 @@ read as documentation as well as run as-is.
 
 ## Running an example
 
-Most files have a shebang line and are directly executable, but the canonical
-way to run any of them is:
+The canonical way to run any of them is:
 
 ```console
 $ docker agent run examples/<name>.yaml

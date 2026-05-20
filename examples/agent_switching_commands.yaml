@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # This example demonstrates slash commands that switch the active agent.
 # Type "/plan" in the TUI to hand the conversation off to the planner sub-agent,
 # "/review" to switch to the reviewer, and "/back" to return to the root agent.

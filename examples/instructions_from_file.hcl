@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 agent "root" {
   description = "Agent that loads its system prompt from a separate file"
   model       = "auto"

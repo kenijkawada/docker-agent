@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Anthropic `task_budget` caps the total tokens a model spends across a
 # multi-step agentic task (thinking + tool calls + final output). docker-agent
 # forwards it as `output_config.task_budget` and automatically attaches the

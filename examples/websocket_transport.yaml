@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Example: WebSocket Transport for OpenAI Responses API
 #
 # This example demonstrates how to use WebSocket streaming instead of

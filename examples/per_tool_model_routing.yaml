@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Per-Tool Model Routing Example
 #
 # This example demonstrates how to use the `model` field on toolsets

@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # An agent that can discover, enable and use any remote streamable-http
 # MCP server from the Docker MCP Catalog on demand.
 #

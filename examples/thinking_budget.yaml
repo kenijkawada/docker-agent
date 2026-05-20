@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Run the demo command with:
 # docker agent run thinking_budget.yaml -c demo
 

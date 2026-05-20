@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 agents:
   root:
     model: anthropic/claude-opus-4-5

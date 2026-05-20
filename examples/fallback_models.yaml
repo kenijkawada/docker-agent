@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Example: Fallback Models for High Availability
 #
 # This configuration demonstrates how to set up fallback models for agents.

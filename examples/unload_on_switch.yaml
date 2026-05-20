@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Demonstrates the `unload` on_agent_switch builtin hook.
 #
 # Two agents share Docker Model Runner but use different models that don't

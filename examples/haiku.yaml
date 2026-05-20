@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 agents:
   root:
     description: An agent that writes haikus

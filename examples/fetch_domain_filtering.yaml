@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Demonstrates domain filtering for the fetch tool. The agent is only allowed
 # to fetch URLs whose host matches one of the entries in `allowed_domains`
 # (the host itself or any subdomain). Use `blocked_domains` instead to keep

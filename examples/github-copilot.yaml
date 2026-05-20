@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # GitHub Copilot requires a `Copilot-Integration-Id` header on every request
 # to https://api.githubcopilot.com. docker-agent sends `copilot-developer-cli`
 # automatically (it works with both OAuth tokens and Personal Access Tokens),

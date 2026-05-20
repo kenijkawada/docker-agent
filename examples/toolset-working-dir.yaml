@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Example: using working_dir for MCP and LSP toolsets
 #
 # Some language servers and MCP tools must be started from a specific directory.

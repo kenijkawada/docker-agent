@@ -1,5 +1,3 @@
-#!/usr/bin/env docker agent run
-
 # Example: Remote MCP server with a custom OAuth callback redirect URL.
 #
 # Some authorization servers refuse http://localhost or http://127.0.0.1
