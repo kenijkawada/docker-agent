@@ -150,10 +150,12 @@ Workflow:
      refuse the connection.
   3. Use the newly activated tools as you would any other.
   4. Call ` + ToolNameDisable + ` to remove a server when no longer needed.
+     This tool only appears once at least one server is enabled.
   5. If a previously authorized OAuth server starts rejecting requests
      (token revoked, scopes changed, signed in to the wrong account),
      call ` + ToolNameResetAuth + ` to wipe the persisted credentials.
-     The next enable will trigger a fresh authorization URL.
+     The next enable will trigger a fresh authorization URL. This tool
+     also only appears once at least one server is enabled.
 
 Prefer enabling only the servers you actually need — every server adds
 tools to the prompt and contributes to context usage.`

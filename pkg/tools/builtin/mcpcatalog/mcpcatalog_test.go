@@ -694,50 +694,53 @@ func TestResetAuthNotifiesEvenWhenKeyringFails(t *testing.T) {
 // server requiring OAuth that is probed in a non-interactive context
 // must not error out. Tools() returns the meta-surface only and the
 // server is silently retried on the next interactive turn.
+
 // TestDisableAndResetAuthGatedOnEnabledServers asserts the meta-surface
 // optimisation: disable_remote_mcp_server and reset_remote_mcp_server_auth
 // are hidden when no server is enabled (so the LLM sees only the actions
 // it can usefully perform), revealed once at least one server is enabled,
 // and hidden again after the last server is disabled.
 func TestDisableAndResetAuthGatedOnEnabledServers(t *testing.T) {
+	// Use a local auth-required fake server so the test never touches the
+	// network and is independent of catalog data. The OAuth path makes
+	// Tools() swallow the AuthorizationRequired error while keeping the
+	// entry in t.enabled, which is exactly the state we want to assert
+	// against.
+	srv := newAuthRequiredMCPServer(t)
+	defer srv.Close()
+
 	ts := New(stubEnv{vars: map[string]string{}})
+
+	const id = "gated-meta-server"
+	ts.catalog.Servers = append(ts.catalog.Servers, Server{
+		ID: id, Title: "Gated", URL: srv.URL,
+		Transport: "streamable-http", Auth: Auth{Type: "oauth"},
+	})
+	ts.byID[id] = ts.catalog.Servers[len(ts.catalog.Servers)-1]
+
 	ctx := t.Context()
+	defer func() { require.NoError(t, ts.Stop(ctx)) }()
 
-	// No server enabled: only search / list / enable.
-	names := toolNames(mustTools(t, ts, ctx))
-	assert.ElementsMatch(t, []string{ToolNameSearch, ToolNameList, ToolNameEnable}, names)
+	names := toolNames(mustTools(t, ctx, ts))
+	assert.ElementsMatch(t, []string{ToolNameSearch, ToolNameList, ToolNameEnable}, names,
+		"with no server enabled, disable/reset_auth must be hidden")
 
-	// Pick the first OAuth server so handleEnable doesn't trip on missing
-	// api_key env vars. We never actually drive the network here — the inner
-	// toolset's Start() will fail, which Tools() swallows for OAuth servers
-	// (IsAuthorizationRequired) but still keeps the entry in t.enabled, so
-	// the gate flips on.
-	var oauthID string
-	for _, s := range ts.catalog.Servers {
-		if s.Auth.Type == "oauth" {
-			oauthID = s.ID
-			break
-		}
-	}
-	require.NotEmpty(t, oauthID)
-
-	_, err := ts.handleEnable(ctx, EnableArgs{ID: oauthID})
+	_, err := ts.handleEnable(ctx, EnableArgs{ID: id})
 	require.NoError(t, err)
 
-	names = toolNames(mustTools(t, ts, ctx))
+	names = toolNames(mustTools(t, ctx, ts))
 	assert.Contains(t, names, ToolNameDisable, "disable must appear once a server is enabled")
 	assert.Contains(t, names, ToolNameResetAuth, "reset_auth must appear once a server is enabled")
 
-	// Disable: gate flips back off.
-	_, err = ts.handleDisable(ctx, DisableArgs{ID: oauthID})
+	_, err = ts.handleDisable(ctx, DisableArgs{ID: id})
 	require.NoError(t, err)
 
-	names = toolNames(mustTools(t, ts, ctx))
+	names = toolNames(mustTools(t, ctx, ts))
 	assert.NotContains(t, names, ToolNameDisable, "disable must be hidden again once no server is enabled")
 	assert.NotContains(t, names, ToolNameResetAuth, "reset_auth must be hidden again once no server is enabled")
 }
 
-func mustTools(t *testing.T, ts *Toolset, ctx context.Context) []tools.Tool {
+func mustTools(t *testing.T, ctx context.Context, ts *Toolset) []tools.Tool {
 	t.Helper()
 	list, err := ts.Tools(ctx)
 	require.NoError(t, err)
