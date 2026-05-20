@@ -295,10 +295,11 @@ func (d *sessionBrowserDialog) View() string {
 	dialogRow, dialogCol := d.Position()
 	d.scrollview.SetPosition(dialogCol+3, dialogRow+sessionBrowserListStartY)
 
-	// Tell the scrollview the total content height and re-clamp the offset
-	// against it. Pass nil for lines because we render only the visible
-	// window below — rendering every row on every keystroke is the dominant
-	// cost when there are many sessions.
+	// Tell the scrollview the total content height; pass nil for lines
+	// because we render only the visible window below. Rendering every row
+	// on every keystroke is the dominant cost when there are many sessions.
+	// The follow-up SetScrollOffset call re-clamps the offset against the
+	// (possibly shrunk) total — it is intentionally not a no-op.
 	total := len(d.filtered)
 	d.scrollview.SetContent(nil, total)
 	d.scrollview.SetScrollOffset(d.scrollview.ScrollOffset())
