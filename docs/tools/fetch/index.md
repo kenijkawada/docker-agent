@@ -28,11 +28,12 @@ toolsets:
 
 ### Options
 
-| Property          | Type           | Default | Description                                                                                                                                                                                                                                                                                                                  |
-| ----------------- | -------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `timeout`         | int            | `30`    | Default request timeout in seconds (overridable per tool call).                                                                                                                                                                                                                                                              |
-| `allowed_domains` | array[string]  | _none_  | Allow-list of hosts the tool may fetch. When set, every URL whose host is **not** in the list is rejected before any network call is made. Mutually exclusive with `blocked_domains`.                                                                                                                                        |
-| `blocked_domains` | array[string]  | _none_  | Deny-list of hosts the tool must not fetch. URLs whose host matches one of these patterns are rejected before any network call (including `robots.txt`) is made. Mutually exclusive with `allowed_domains`.                                                                                                                  |
+| Property             | Type          | Default | Description                                                                                                                                                                                                                                                                                                                  |
+| -------------------- | ------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timeout`            | int           | `30`    | Default request timeout in seconds (overridable per tool call).                                                                                                                                                                                                                                                              |
+| `allowed_domains`    | array[string] | _none_  | Allow-list of hosts the tool may fetch. When set, every URL whose host is **not** in the list is rejected before any network call is made. Mutually exclusive with `blocked_domains`.                                                                                                                                        |
+| `blocked_domains`    | array[string] | _none_  | Deny-list of hosts the tool must not fetch. URLs whose host matches one of these patterns are rejected before any network call (including `robots.txt`) is made. Mutually exclusive with `allowed_domains`.                                                                                                                  |
+| `allow_private_ips`  | bool          | `false` | Opt in to dialling **non-public** IP addresses (loopback, RFC1918, link-local — including the cloud-metadata endpoint at `169.254.169.254` — multicast, and the unspecified address). Required to reach `localhost` / internal services. See [SSRF protection](#ssrf-protection-and-reaching-localhost) below.               |
 
 ### Domain matching
 
@@ -86,6 +87,43 @@ toolsets:
       - "*.internal.example.com"  # any subdomain (wildcard)
       - internal.example.com  # internal corporate hostname
 ```
+
+<div class="callout callout-info" markdown="1">
+<div class="callout-title">Already blocked by default
+</div>
+  <p>You do <strong>not</strong> need to add loopback, RFC1918, link-local (incl. <code>169.254.169.254</code>), multicast or the unspecified address to <code>blocked_domains</code> to be safe — the fetch tool already refuses connections to those ranges at dial time, after DNS resolution. The example above is only useful if you also want to reject those hosts <em>before</em> any network call (and to surface a clearer error message to the agent), or if you have set <code>allow_private_ips: true</code> and want to deny a specific subset.</p>
+</div>
+
+### SSRF protection and reaching localhost
+
+By default, the fetch tool refuses connections to **non-public IP addresses** — even when DNS for an otherwise-public host resolves to one of them (so DNS rebinding is also blocked). The check happens at dial time, after DNS resolution, and rejects:
+
+- **Loopback** — `127.0.0.0/8`, `::1` (this is what blocks `http://localhost/...` and `http://127.0.0.1/...`)
+- **RFC1918 private ranges** — `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
+- **Link-local** — `169.254.0.0/16` (IPv4, including the cloud-metadata endpoint `169.254.169.254`) and `fe80::/10` (IPv6)
+- **Multicast** and the **unspecified** address (`0.0.0.0`, `::`)
+- **IPv4-mapped IPv6** — addresses like `::ffff:127.0.0.1` or `::ffff:169.254.169.254` are normalized to their IPv4 form and blocked accordingly
+
+This is the default because LLM-driven fetches are a classic Server-Side Request Forgery (SSRF) vector: a prompt-injected URL can otherwise reach internal services, cloud metadata, or admin interfaces on the host running the agent.
+
+If an agent legitimately needs to call **localhost** or an **internal service**, opt in with `allow_private_ips: true`:
+
+```yaml
+toolsets:
+  - type: fetch
+    allow_private_ips: true
+    allowed_domains:
+      - localhost
+      - 127.0.0.1
+      - 10.0.0.0/8            # internal corporate range
+```
+
+<div class="callout callout-warning" markdown="1">
+<div class="callout-title">Pair with an allow-list
+</div>
+  <p>Setting <code>allow_private_ips: true</code> alone re-exposes the SSRF surface. We strongly recommend combining it with an <code>allowed_domains</code> entry that restricts the tool to the specific internal hosts or CIDRs the agent actually needs (e.g. <code>localhost</code>, <code>127.0.0.1</code>, or your internal CIDR).</p>
+  <p><strong>Note:</strong> <code>allowed_domains</code> is checked <em>before</em> DNS resolution (string-based on hostname), while the SSRF check happens <em>after</em> DNS resolution (on the resolved IP). This means <code>allowed_domains</code> and <code>blocked_domains</code> are evaluated independently of <code>allow_private_ips</code> and continue to apply. A public hostname in <code>allowed_domains</code> that resolves to a private IP will still be blocked unless <code>allow_private_ips: true</code> is set.</p>
+</div>
 
 ## Tool Interface
 
