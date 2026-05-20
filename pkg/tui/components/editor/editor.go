@@ -27,6 +27,7 @@ import (
 	"github.com/docker/docker-agent/pkg/tui/components/editor/completions"
 	"github.com/docker/docker-agent/pkg/tui/core"
 	"github.com/docker/docker-agent/pkg/tui/core/layout"
+	"github.com/docker/docker-agent/pkg/tui/internal/termfeatures"
 	"github.com/docker/docker-agent/pkg/tui/messages"
 	"github.com/docker/docker-agent/pkg/tui/styles"
 )
@@ -195,7 +196,7 @@ func New(hist *history.History, opts ...Option) Editor {
 		textarea:                      ta,
 		searchInput:                   si,
 		hist:                          hist,
-		keyboardEnhancementsSupported: false,
+		keyboardEnhancementsSupported: termfeatures.SupportsModifiedEnter(os.Getenv),
 		banner:                        newAttachmentBanner(),
 	}
 
@@ -634,7 +635,7 @@ func (e *editor) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 		}
 	case tea.KeyboardEnhancementsMsg:
 		// Track keyboard enhancement support and configure newline keybinding accordingly
-		e.keyboardEnhancementsSupported = msg.Flags != 0
+		e.keyboardEnhancementsSupported = msg.Flags != 0 || termfeatures.SupportsModifiedEnter(os.Getenv)
 		e.configureNewlineKeybinding()
 		return e, nil
 	case messages.ThemeChangedMsg:

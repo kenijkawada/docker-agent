@@ -34,6 +34,7 @@ import (
 	"github.com/docker/docker-agent/pkg/tui/core"
 	"github.com/docker/docker-agent/pkg/tui/dialog"
 	"github.com/docker/docker-agent/pkg/tui/internal/editorname"
+	"github.com/docker/docker-agent/pkg/tui/internal/termfeatures"
 	"github.com/docker/docker-agent/pkg/tui/messages"
 	"github.com/docker/docker-agent/pkg/tui/page/chat"
 	"github.com/docker/docker-agent/pkg/tui/service"
@@ -287,28 +288,29 @@ func New(ctx context.Context, spawner SessionSpawner, initialApp *app.App, initi
 		buildCommandCategories: func(ctx context.Context, _ tea.Model) []commands.Category {
 			return commands.BuildCommandCategories(ctx, initialApp)
 		},
-		supervisor:              sv,
-		tabBar:                  tb,
-		tuiStore:                ts,
-		chatPages:               map[string]chat.Page{},
-		editors:                 map[string]editor.Editor{},
-		sessionStates:           map[string]*service.SessionState{sessID: initialSessionState},
-		application:             initialApp,
-		sessionState:            initialSessionState,
-		history:                 historyStore,
-		pendingRestores:         make(map[string]string),
-		pendingSidebarCollapsed: make(map[string]bool),
-		stashedDialogs:          make(map[string]stashedDialog),
-		notification:            notification.New(),
-		dialogMgr:               dialog.New(),
-		completions:             completion.New(),
-		transcriber:             transcribe.New(os.Getenv("OPENAI_API_KEY")),
-		workingSpinner:          spinner.New(spinner.ModeSpinnerOnly, styles.SpinnerDotsHighlightStyle),
-		focusedPanel:            PanelEditor,
-		editorLines:             3,
-		dockerDesktop:           os.Getenv("TERM_PROGRAM") == "docker_desktop",
-		appName:                 "docker agent",
-		appVersion:              version.Version,
+		supervisor:                    sv,
+		tabBar:                        tb,
+		tuiStore:                      ts,
+		chatPages:                     map[string]chat.Page{},
+		editors:                       map[string]editor.Editor{},
+		sessionStates:                 map[string]*service.SessionState{sessID: initialSessionState},
+		application:                   initialApp,
+		sessionState:                  initialSessionState,
+		history:                       historyStore,
+		pendingRestores:               make(map[string]string),
+		pendingSidebarCollapsed:       make(map[string]bool),
+		stashedDialogs:                make(map[string]stashedDialog),
+		notification:                  notification.New(),
+		dialogMgr:                     dialog.New(),
+		completions:                   completion.New(),
+		transcriber:                   transcribe.New(os.Getenv("OPENAI_API_KEY")),
+		workingSpinner:                spinner.New(spinner.ModeSpinnerOnly, styles.SpinnerDotsHighlightStyle),
+		focusedPanel:                  PanelEditor,
+		editorLines:                   3,
+		keyboardEnhancementsSupported: termfeatures.SupportsModifiedEnter(os.Getenv),
+		dockerDesktop:                 os.Getenv("TERM_PROGRAM") == "docker_desktop",
+		appName:                       "docker agent",
+		appVersion:                    version.Version,
 	}
 
 	// Apply options
@@ -651,7 +653,8 @@ func (m *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyboardEnhancementsMsg:
 		m.keyboardEnhancements = &msg
-		m.keyboardEnhancementsSupported = msg.Flags != 0
+		m.keyboardEnhancementsSupported = msg.Flags != 0 || termfeatures.SupportsModifiedEnter(os.Getenv)
+		m.statusBar.InvalidateCache()
 		return m, tea.Batch(m.updateChatCmd(msg), m.updateEditorCmd(msg))
 
 	// --- Keyboard input ---
