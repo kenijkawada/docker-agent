@@ -97,13 +97,18 @@ func TestEnableDisableLifecycle(t *testing.T) {
 	var changes atomic.Int32
 	ts.SetToolsChangedHandler(func() { changes.Add(1) })
 
-	// Before enabling: only meta-tools.
+	// Before enabling: only the always-on meta-tools. Disable and reset are
+	// hidden until at least one server is enabled.
 	toolList, err := ts.Tools(ctx)
 	require.NoError(t, err)
 	names := toolNames(toolList)
 	assert.ElementsMatch(t, []string{
-		ToolNameSearch, ToolNameList, ToolNameEnable, ToolNameDisable, ToolNameResetAuth,
+		ToolNameSearch, ToolNameList, ToolNameEnable,
 	}, names)
+	assert.NotContains(t, names, ToolNameDisable,
+		"disable must not be exposed when no server is enabled")
+	assert.NotContains(t, names, ToolNameResetAuth,
+		"reset_auth must not be exposed when no server is enabled")
 
 	// Enable: a callback should fire and the underlying mcp.Toolset should
 	// be present in t.enabled. We deliberately do NOT exercise the network
@@ -499,8 +504,9 @@ func TestToolsExposesEnabledServerTools(t *testing.T) {
 	require.NoError(t, err)
 
 	names := toolNames(toolList)
-	// Meta-tools are always there.
-	for _, meta := range []string{ToolNameSearch, ToolNameList, ToolNameEnable, ToolNameDisable} {
+	// All five meta-tools must be visible once a server is enabled
+	// (disable / reset_auth are gated on len(enabled) > 0).
+	for _, meta := range []string{ToolNameSearch, ToolNameList, ToolNameEnable, ToolNameDisable, ToolNameResetAuth} {
 		assert.Contains(t, names, meta)
 	}
 	// And so is the tool exposed by the fake MCP server.
@@ -688,6 +694,59 @@ func TestResetAuthNotifiesEvenWhenKeyringFails(t *testing.T) {
 // server requiring OAuth that is probed in a non-interactive context
 // must not error out. Tools() returns the meta-surface only and the
 // server is silently retried on the next interactive turn.
+
+// TestDisableAndResetAuthGatedOnEnabledServers asserts the meta-surface
+// optimisation: disable_remote_mcp_server and reset_remote_mcp_server_auth
+// are hidden when no server is enabled (so the LLM sees only the actions
+// it can usefully perform), revealed once at least one server is enabled,
+// and hidden again after the last server is disabled.
+func TestDisableAndResetAuthGatedOnEnabledServers(t *testing.T) {
+	// Use a local auth-required fake server so the test never touches the
+	// network and is independent of catalog data. The OAuth path makes
+	// Tools() swallow the AuthorizationRequired error while keeping the
+	// entry in t.enabled, which is exactly the state we want to assert
+	// against.
+	srv := newAuthRequiredMCPServer(t)
+	defer srv.Close()
+
+	ts := New(stubEnv{vars: map[string]string{}})
+
+	const id = "gated-meta-server"
+	ts.catalog.Servers = append(ts.catalog.Servers, Server{
+		ID: id, Title: "Gated", URL: srv.URL,
+		Transport: "streamable-http", Auth: Auth{Type: "oauth"},
+	})
+	ts.byID[id] = ts.catalog.Servers[len(ts.catalog.Servers)-1]
+
+	ctx := t.Context()
+	defer func() { require.NoError(t, ts.Stop(ctx)) }()
+
+	names := toolNames(mustTools(t, ctx, ts))
+	assert.ElementsMatch(t, []string{ToolNameSearch, ToolNameList, ToolNameEnable}, names,
+		"with no server enabled, disable/reset_auth must be hidden")
+
+	_, err := ts.handleEnable(ctx, EnableArgs{ID: id})
+	require.NoError(t, err)
+
+	names = toolNames(mustTools(t, ctx, ts))
+	assert.Contains(t, names, ToolNameDisable, "disable must appear once a server is enabled")
+	assert.Contains(t, names, ToolNameResetAuth, "reset_auth must appear once a server is enabled")
+
+	_, err = ts.handleDisable(ctx, DisableArgs{ID: id})
+	require.NoError(t, err)
+
+	names = toolNames(mustTools(t, ctx, ts))
+	assert.NotContains(t, names, ToolNameDisable, "disable must be hidden again once no server is enabled")
+	assert.NotContains(t, names, ToolNameResetAuth, "reset_auth must be hidden again once no server is enabled")
+}
+
+func mustTools(t *testing.T, ctx context.Context, ts *Toolset) []tools.Tool {
+	t.Helper()
+	list, err := ts.Tools(ctx)
+	require.NoError(t, err)
+	return list
+}
+
 func TestToolsAuthRequiredIsDeferred(t *testing.T) {
 	srv := newAuthRequiredMCPServer(t)
 	defer srv.Close()

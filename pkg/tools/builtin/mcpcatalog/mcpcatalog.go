@@ -2,7 +2,7 @@
 // streamable-http servers as a single agent-side toolset that supports
 // on-demand activation.
 //
-// The toolset surfaces five meta-tools to the model:
+// The toolset surfaces up to five meta-tools to the model:
 //
 //   - search_remote_mcp_servers — case-insensitive fuzzy search over the
 //     curated catalog (id / title / description / category / tags).
@@ -11,8 +11,10 @@
 //     (defers the actual TCP connect / OAuth handshake until Tools() is
 //     next enumerated).
 //   - disable_remote_mcp_server — stop the toolset and remove its tools.
+//     Only exposed once at least one server is enabled.
 //   - reset_remote_mcp_server_auth — drop persisted OAuth credentials so
-//     the next enable triggers a fresh authorization flow.
+//     the next enable triggers a fresh authorization flow. Only exposed
+//     once at least one server is enabled.
 //
 // Activated servers' tools are merged into Tools(); tool list changes are
 // reported via a tools.ChangeNotifier handler so the runtime refreshes
@@ -148,10 +150,12 @@ Workflow:
      refuse the connection.
   3. Use the newly activated tools as you would any other.
   4. Call ` + ToolNameDisable + ` to remove a server when no longer needed.
+     This tool only appears once at least one server is enabled.
   5. If a previously authorized OAuth server starts rejecting requests
      (token revoked, scopes changed, signed in to the wrong account),
      call ` + ToolNameResetAuth + ` to wipe the persisted credentials.
-     The next enable will trigger a fresh authorization URL.
+     The next enable will trigger a fresh authorization URL. This tool
+     also only appears once at least one server is enabled.
 
 Prefer enabling only the servers you actually need — every server adds
 tools to the prompt and contributes to context usage.`
@@ -297,29 +301,6 @@ func (t *Toolset) Tools(ctx context.Context) ([]tools.Tool, error) {
 				Title: "Enable remote MCP server",
 			},
 		},
-		{
-			Name:         ToolNameDisable,
-			Category:     "mcp_catalog",
-			Description:  "Disable a previously enabled remote MCP server, dropping its tools from the active set.",
-			Parameters:   tools.MustSchemaFor[DisableArgs](),
-			OutputSchema: tools.MustSchemaFor[string](),
-			Handler:      tools.NewHandler(t.handleDisable),
-			Annotations: tools.ToolAnnotations{
-				Title: "Disable remote MCP server",
-			},
-		},
-		{
-			Name:         ToolNameResetAuth,
-			Category:     "mcp_catalog",
-			Description:  "Clear persisted OAuth credentials (access token, refresh token, dynamic-client-registration data) for a catalog server. The next enable will trigger a fresh authorization flow. No-op for api_key/none servers.",
-			Parameters:   tools.MustSchemaFor[ResetAuthArgs](),
-			OutputSchema: tools.MustSchemaFor[string](),
-			Handler:      tools.NewHandler(t.handleResetAuth),
-			Annotations: tools.ToolAnnotations{
-				Title:           "Reset remote MCP server auth",
-				DestructiveHint: new(true),
-			},
-		},
 	}
 
 	t.mu.RLock()
@@ -328,6 +309,38 @@ func (t *Toolset) Tools(ctx context.Context) ([]tools.Tool, error) {
 		enabled = append(enabled, enabledServer{id: id, ts: ts})
 	}
 	t.mu.RUnlock()
+
+	// disable_remote_mcp_server and reset_remote_mcp_server_auth only make
+	// sense once at least one server is enabled. Hiding them otherwise keeps
+	// the meta-tool surface (and the LLM's prompt) minimal until the model
+	// has actually activated something.
+	if len(enabled) > 0 {
+		result = append(result,
+			tools.Tool{
+				Name:         ToolNameDisable,
+				Category:     "mcp_catalog",
+				Description:  "Disable a previously enabled remote MCP server, dropping its tools from the active set.",
+				Parameters:   tools.MustSchemaFor[DisableArgs](),
+				OutputSchema: tools.MustSchemaFor[string](),
+				Handler:      tools.NewHandler(t.handleDisable),
+				Annotations: tools.ToolAnnotations{
+					Title: "Disable remote MCP server",
+				},
+			},
+			tools.Tool{
+				Name:         ToolNameResetAuth,
+				Category:     "mcp_catalog",
+				Description:  "Clear persisted OAuth credentials (access token, refresh token, dynamic-client-registration data) for a catalog server. The next enable will trigger a fresh authorization flow. No-op for api_key/none servers.",
+				Parameters:   tools.MustSchemaFor[ResetAuthArgs](),
+				OutputSchema: tools.MustSchemaFor[string](),
+				Handler:      tools.NewHandler(t.handleResetAuth),
+				Annotations: tools.ToolAnnotations{
+					Title:           "Reset remote MCP server auth",
+					DestructiveHint: new(true),
+				},
+			},
+		)
+	}
 
 	// Stable iteration order: handleEnable / handleDisable can run between
 	// Tools() invocations, but for a given snapshot we want a deterministic
