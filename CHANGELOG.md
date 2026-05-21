@@ -3,6 +3,81 @@
 All notable changes to this project will be documented in this file.
 
 
+## [v1.62.0] - 2026-05-21
+
+This release improves error handling for model context overflow, adds external coding harness support, and includes numerous TUI fixes and performance optimizations.
+
+## What's New
+
+- Adds external coding harness agents that delegate coding tasks to external coding CLIs
+- Adds support for running `context: fork` slash commands as sub-sessions instead of inlining them
+- Adds docker-agent kit staging in sandbox with skills and prompt files
+
+## Improvements
+
+- Classifies overflow errors by kind to provide more specific error messages for different types of context window issues
+- Optimizes session browser rendering to only render visible window rows for better performance with large session histories
+- Improves shutdown safety by racing Wait() against deadline and calling ReleaseTerminal on timeout
+- Updates Gemini adapter to forward stream chunks that carry only UsageMetadata for accurate token counting
+
+## Bug Fixes
+
+- Fixes URL clicks in TUI by properly handling mouse events
+- Fixes crash prevention by not notifying on click if the agent didn't change
+- Fixes deadlock in TUI exit safety net and race conditions in shutdown handling
+- Fixes auto-scroll blocking user scroll in long elicitation dialogs
+- Fixes MCP tool name prefix stripping in callTool functionality
+- Fixes OpenAI strict mode support for Notion and Jira MCP tools with gpt-5
+- Fixes user_prompt dialog to open scrolled to top and respect user scrolling
+- Fixes keychain prompts in tests by using in-memory token store
+- Fixes MCP OAuth handler to drop stray callbacks and respond with proper HTTP status codes
+
+## Technical Changes
+
+- Bounds three previously-unbounded caches to prevent memory growth on long sessions
+- Uses SSRF-safe HTTP client for remote skills registry
+- Honors Cache-Control headers properly in skills caching
+- Extracts lrucache package and bounds unbounded caches
+- Refactors model override into runAgent request body for atomic model selection
+- Updates Grok example to use grok-4.3 model
+- Treats wezterm as a terminal that handles shift+enter properly
+- Adds clean task to remove generated binary
+- Updates various dependencies including Anthropic SDK, AWS Bedrock runtime, and Docker CLI
+
+### Pull Requests
+
+- [#2615](https://github.com/docker/docker-agent/pull/2615) - Merge pull request #2851 from dgageot/docs/2615-variable-expansion
+- [#2710](https://github.com/docker/docker-agent/pull/2710) - fix: centralize environment variable expansion at config boundary
+- [#2818](https://github.com/docker/docker-agent/pull/2818) - modelerrors: make overflow errors more specific
+- [#2820](https://github.com/docker/docker-agent/pull/2820) - Misc Security fixes
+- [#2822](https://github.com/docker/docker-agent/pull/2822) - docs: update CHANGELOG.md for v1.61.0
+- [#2823](https://github.com/docker/docker-agent/pull/2823) - tui: Fix URL clicks
+- [#2824](https://github.com/docker/docker-agent/pull/2824) - Don't notify on click if the agent didn't change
+- [#2825](https://github.com/docker/docker-agent/pull/2825) - Treat wezterm as a terminal that knows how to handle shift+enter
+- [#2826](https://github.com/docker/docker-agent/pull/2826) - feat: add external coding harness agents
+- [#2827](https://github.com/docker/docker-agent/pull/2827) - Add .cache to .gitignore
+- [#2830](https://github.com/docker/docker-agent/pull/2830) - perf(tui): only render visible session rows in /sessions dialog
+- [#2831](https://github.com/docker/docker-agent/pull/2831) - fix(tui): bound previously-unbounded caches to prevent OOM on long sessions
+- [#2833](https://github.com/docker/docker-agent/pull/2833) - docs: document allow_private_ips option and SSRF protection in fetch tool
+- [#2835](https://github.com/docker/docker-agent/pull/2835) - docs(memory): fix incorrect default database path placeholder
+- [#2836](https://github.com/docker/docker-agent/pull/2836) - fix: use in-memory token store in tests to avoid OS keychain prompt
+- [#2837](https://github.com/docker/docker-agent/pull/2837) - fix MCP tool name prefix stripping in callTool
+- [#2838](https://github.com/docker/docker-agent/pull/2838) - chore(examples): remove shebang lines and executable bits
+- [#2839](https://github.com/docker/docker-agent/pull/2839) - fix(openai): support Notion and Jira MCP tools with gpt-5 strict mode
+- [#2840](https://github.com/docker/docker-agent/pull/2840) - feat(mcpcatalog): hide disable / reset_auth tools when no server is enabled
+- [#2842](https://github.com/docker/docker-agent/pull/2842) - fix(tui): restore terminal on Ctrl-C when bubbletea shutdown stalls
+- [#2843](https://github.com/docker/docker-agent/pull/2843) - fix(tui): user_prompt dialog opens scrolled to top and respects user scrolling
+- [#2844](https://github.com/docker/docker-agent/pull/2844) - feat(sandbox): docker-agent kit, gateway allowlist, and assorted --sandbox fixes
+- [#2845](https://github.com/docker/docker-agent/pull/2845) - test(server): make TestAttachedServer_DeleteSessionStopsEventStream more robust
+- [#2846](https://github.com/docker/docker-agent/pull/2846) - fix(examples): update grok example to use grok-4.3
+- [#2847](https://github.com/docker/docker-agent/pull/2847) - chore: add clean task to remove generated binary
+- [#2848](https://github.com/docker/docker-agent/pull/2848) - fix(gemini): forward stream chunks that carry only UsageMetadata
+- [#2849](https://github.com/docker/docker-agent/pull/2849) - chore: bump direct Go dependencies
+- [#2850](https://github.com/docker/docker-agent/pull/2850) - feat(skills): run `context: fork` slash commands as sub-sessions
+- [#2851](https://github.com/docker/docker-agent/pull/2851) - docs+config: surface the two env-variable expansion syntaxes (#2615)
+- [#2852](https://github.com/docker/docker-agent/pull/2852) - refactor(api): fold model override into runAgent request body
+
+
 ## [v1.61.0] - 2026-05-19
 
 This is a maintenance release that updates documentation for the previous version.
@@ -2816,3 +2891,5 @@ This release improves the terminal user interface with better error handling and
 [v1.60.0]: https://github.com/docker/docker-agent/releases/tag/v1.60.0
 
 [v1.61.0]: https://github.com/docker/docker-agent/releases/tag/v1.61.0
+
+[v1.62.0]: https://github.com/docker/docker-agent/releases/tag/v1.62.0
