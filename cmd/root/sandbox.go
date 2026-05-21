@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"os"
@@ -83,6 +84,8 @@ func runInSandbox(ctx context.Context, cmd *cobra.Command, args []string, runCon
 			// user has run.
 		}
 	}
+
+	printModelsGateway(cmd.OutOrStdout(), runConfig.ModelsGateway)
 
 	name, err := backend.Ensure(ctx, wd, extras, template, configDir)
 	if err != nil {
@@ -226,4 +229,27 @@ func gatewayHostPort(rawURL string) string {
 		}
 	}
 	return rawURL
+}
+
+// printModelsGateway prints which AI gateway (if any) the inner agent
+// will route model requests through. Surfacing this between the kit
+// summary and the sandbox-create line makes it obvious — at a glance
+// — whether a "HTTP 403" the user might see later originated from
+// the proxy's network policy (gateway host not yet allow-listed) or
+// from the gateway server itself.
+//
+// Empty gateway means the inner talks to the providers directly using
+// the keys the docker-agent process can resolve from its own
+// environment (DOCKER_TOKEN bypass, OS env vars, ...).
+func printModelsGateway(w io.Writer, gateway string) {
+	if gateway == "" {
+		fmt.Fprintln(w, "Models gateway: none (talking to providers directly)")
+		return
+	}
+	host := gatewayHostPort(gateway)
+	if host == "" || host == gateway {
+		fmt.Fprintf(w, "Models gateway: %s\n", gateway)
+		return
+	}
+	fmt.Fprintf(w, "Models gateway: %s (allowlisting %s in the sandbox proxy)\n", gateway, host)
 }

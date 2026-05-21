@@ -2,6 +2,7 @@ package root
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -102,6 +103,40 @@ func TestGatewayHostPort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, gatewayHostPort(tt.raw))
+		})
+	}
+}
+
+func TestPrintModelsGateway(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		gateway string
+		want    string
+	}{
+		{
+			name:    "no gateway",
+			gateway: "",
+			want:    "Models gateway: none (talking to providers directly)\n",
+		},
+		{
+			name:    "URL gateway shows allow-listed host",
+			gateway: "https://ai-backend-service-stage.docker.com/proxy",
+			want:    "Models gateway: https://ai-backend-service-stage.docker.com/proxy (allowlisting ai-backend-service-stage.docker.com in the sandbox proxy)\n",
+		},
+		{
+			name:    "bare authority is its own host",
+			gateway: "ai-backend-service.docker.com:443",
+			want:    "Models gateway: ai-backend-service.docker.com:443\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf strings.Builder
+			printModelsGateway(&buf, tt.gateway)
+			assert.Equal(t, tt.want, buf.String())
 		})
 	}
 }
