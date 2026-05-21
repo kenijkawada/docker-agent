@@ -1,6 +1,7 @@
 package root
 
 import (
+	"context"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -128,6 +129,56 @@ func TestGatewayFlags_CallsAncestorPersistentPreRunE(t *testing.T) {
 	root.SetArgs([]string{"middle", "leaf"})
 	require.NoError(t, root.Execute())
 	assert.True(t, called, "root PersistentPreRunE should have been called through the intermediate parent")
+}
+
+func TestGatewayFlags_RunsParentBeforeMaterialisingEnvProvider(t *testing.T) {
+	// Regression test: the persistent pre-run for the gateway flags
+	// used to call runConfig.EnvProvider() before invoking the parent
+	// PersistentPreRunE that overrides --config-dir / --cache-dir /
+	// --data-dir. Because EnvProvider() caches its result, the parent
+	// override never landed in the cached chain — in particular the
+	// in-sandbox SandboxTokenProvider was constructed with the wrong
+	// path (~/.config/cagent inside the sandbox image instead of the
+	// host config dir bind-mounted at the same location), causing the
+	// inner agent to fail with "sorry, you first need to sign in
+	// Docker Desktop to use the Docker AI Gateway" even when the
+	// host-side token writer was working.
+	parentRanFirst := false
+	envProviderConsulted := false
+
+	root := &cobra.Command{Use: "root"}
+	root.PersistentPreRunE = func(*cobra.Command, []string) error {
+		assert.False(t, envProviderConsulted,
+			"parent PersistentPreRunE must run before the gateway pre-run materialises the env provider")
+		parentRanFirst = true
+		return nil
+	}
+
+	leaf := &cobra.Command{
+		Use:  "leaf",
+		Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error { return nil },
+	}
+	runConfig := config.RuntimeConfig{
+		EnvProviderForTests: &recordingProvider{onGet: func() { envProviderConsulted = true }},
+	}
+	addGatewayFlags(leaf, &runConfig)
+	root.AddCommand(leaf)
+
+	root.SetArgs([]string{"leaf"})
+	require.NoError(t, root.Execute())
+	assert.True(t, parentRanFirst, "parent PersistentPreRunE never ran")
+}
+
+// recordingProvider invokes onGet on every Get call so tests can
+// observe when the env provider chain is first consulted.
+type recordingProvider struct {
+	onGet func()
+}
+
+func (p *recordingProvider) Get(_ context.Context, _ string) (string, bool) {
+	p.onGet()
+	return "", false
 }
 
 func TestCanonize(t *testing.T) {
