@@ -14,6 +14,8 @@ import (
 	"github.com/docker/docker-agent/pkg/team"
 	"github.com/docker/docker-agent/pkg/teamloader"
 	"github.com/docker/docker-agent/pkg/telemetry"
+	"github.com/docker/docker-agent/pkg/tools"
+	skillstool "github.com/docker/docker-agent/pkg/tools/builtin/skills"
 )
 
 type debugFlags struct {
@@ -42,6 +44,12 @@ func newDebugCmd() *cobra.Command {
 		Short: "Debug the toolsets of an agent",
 		Args:  cobra.ExactArgs(1),
 		RunE:  flags.runDebugToolsetsCommand,
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "skills <agent-file>|<registry-ref>",
+		Short: "Debug the skills of an agent",
+		Args:  cobra.ExactArgs(1),
+		RunE:  flags.runDebugSkillsCommand,
 	})
 	titleCmd := &cobra.Command{
 		Use:   "title <agent-file>|<registry-ref> <question>",
@@ -118,20 +126,70 @@ func (f *debugFlags) runDebugToolsetsCommand(cmd *cobra.Command, args []string) 
 			continue
 		}
 
-		tools, err := agent.Tools(ctx)
+		agentTools, err := agent.Tools(ctx)
 		if err != nil {
 			slog.ErrorContext(ctx, "Failed to query tools", "name", agent.Name(), "error", err)
 			continue
 		}
 
-		if len(tools) == 0 {
+		if len(agentTools) == 0 {
 			out.Printf("No tools for %s\n", agent.Name())
 			continue
 		}
 
-		out.Printf("%d tool(s) for %s:\n", len(tools), agent.Name())
-		for _, tool := range tools {
+		out.Printf("%d tool(s) for %s:\n", len(agentTools), agent.Name())
+		for _, tool := range agentTools {
 			out.Println(" +", tool.Name, "-", tool.Description)
+		}
+	}
+
+	return nil
+}
+
+func (f *debugFlags) runDebugSkillsCommand(cmd *cobra.Command, args []string) (commandErr error) {
+	telemetry.TrackCommand(cmd.Context(), "debug", append([]string{"skills"}, args...))
+	defer func() { // do not inline this defer so that commandErr is not resolved early
+		telemetry.TrackCommandError(cmd.Context(), "debug", append([]string{"skills"}, args...), commandErr)
+	}()
+
+	ctx := cmd.Context()
+
+	t, err := f.loadTeam(ctx, args[0])
+	if err != nil {
+		return err
+	}
+	defer stopToolSets(t)
+
+	out := cli.NewPrinter(cmd.OutOrStdout())
+
+	for _, name := range t.AgentNames() {
+		agent, err := t.Agent(name)
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to get agent", "name", name, "error", err)
+			continue
+		}
+
+		var skillsToolset *skillstool.ToolSet
+		for _, ts := range agent.ToolSets() {
+			if st, ok := tools.As[*skillstool.ToolSet](ts); ok {
+				skillsToolset = st
+				break
+			}
+		}
+
+		if skillsToolset == nil || len(skillsToolset.Skills()) == 0 {
+			out.Printf("No skills for %s\n", agent.Name())
+			continue
+		}
+
+		loadedSkills := skillsToolset.Skills()
+		out.Printf("%d skill(s) for %s:\n", len(loadedSkills), agent.Name())
+		for _, skill := range loadedSkills {
+			marker := ""
+			if skill.IsFork() {
+				marker = " [forked]"
+			}
+			out.Println(" +", skill.Name+marker, "-", skill.Description)
 		}
 	}
 

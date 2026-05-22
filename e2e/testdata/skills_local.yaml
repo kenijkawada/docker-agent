@@ -1,0 +1,7 @@
+agents:
+  root:
+    model: openai/gpt-3.5-turbo
+    description: A helpful AI assistant
+    instruction: |
+      You are a knowledgeable assistant.
+    skills: true
