@@ -43,6 +43,7 @@ $ docker agent run [config] [message...] [flags]
 | `--sandbox`                             | Run the agent inside a Docker sandbox (see [Sandbox]({{ '/configuration/sandbox/' | relative_url }}))                                     |
 | `--template <image>`                    | Template image for the sandbox (default: `docker/sandbox-templates:docker-agent`)                                                         |
 | `--sbx`                                 | Prefer the `sbx` CLI backend when available (default `true`; set `--sbx=false` to force `docker sandbox`)                                 |
+| `--no-kit`                              | Disable the [auto-kit]({{ '/configuration/sandbox/' | relative_url }}#auto-kit): do not stage skills or prompt files into the sandbox    |
 | `--working-dir <path>`                  | Set the working directory for the session (applies to tools and relative paths)                                                           |
 | `--env-from-file <path>`                | Load environment variables from file (repeatable)                                                                                         |
 | `--code-mode-tools`                     | Provide a single tool to call other tools via JavaScript (forces code-mode tools globally)                                                |

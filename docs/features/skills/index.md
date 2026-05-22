@@ -221,6 +221,10 @@ When multiple skills share the same name:
 2. Project skills load next, from git root toward current directory
 3. Skills closer to the current directory override those further away
 
+## Skills in Sandbox Mode
+
+When you run an agent with [`--sandbox`]({{ '/configuration/sandbox/' | relative_url }}), the sandbox VM has its own filesystem with no access to your host's skill directories. docker-agent handles this transparently via the [auto-kit]({{ '/configuration/sandbox/' | relative_url }}#auto-kit): every discovered local skill is staged into a per-agent kit on the host, run through best-effort secret redaction (see the [auto-kit]({{ '/configuration/sandbox/' | relative_url }}#secret-redaction) docs), and bind-mounted read-only into the sandbox so the agent sees the same skills inside the VM as on the host. No configuration is required — use `--no-kit` only if you explicitly want to run the sandbox without any host skills.
+
 ## Creating a Skill
 
 ```bash
